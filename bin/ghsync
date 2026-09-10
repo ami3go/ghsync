@@ -1,0 +1,589 @@
+#!/usr/bin/env bash
+#
+# ghsync — clone and keep all your GitHub repositories up to date.
+#
+#   ghsync                      launch the TUI
+#   ghsync clone                clone every repo that is missing locally
+#   ghsync pull                 fetch + fast-forward every local repo
+#   ghsync sync                 clone missing, then pull everything
+#   ghsync status               show branch / dirty / ahead-behind for each repo
+#   ghsync cron install "0 */6 * * *"
+#   ghsync cron remove | status
+#
+# Requires: bash 4+, git, gh (GitHub CLI, authenticated with `gh auth login`).
+#
+set -uo pipefail
+
+VERSION="1.0.0"
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+CRON_TAG="# ghsync"
+
+# cron gives us a bare PATH — make sure git/gh are still findable.
+export PATH="$PATH:/usr/local/bin:/usr/bin:/bin:/snap/bin:$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ghsync"
+CONFIG_FILE="$CONFIG_DIR/config"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ghsync"
+LOG_FILE="$STATE_DIR/ghsync.log"
+LOCK_FILE="$STATE_DIR/ghsync.lock"
+mkdir -p "$CONFIG_DIR" "$STATE_DIR"
+
+# ---------------------------------------------------------------- defaults ---
+ROOT="$HOME/github"       # where repos live: $ROOT/<owner>/<repo>
+OWNERS=""                 # empty = your own repos; else "me myorg otherorg"
+PROTOCOL="ssh"            # ssh | https
+INCLUDE_FORKS=false
+INCLUDE_ARCHIVED=false
+JOBS=4                    # parallel git operations
+LIMIT=1000                # max repos fetched per owner
+GIT_TIMEOUT=600           # seconds per git operation
+QUIET=false
+PORCELAIN=false           # tab-separated machine output (used by the Cockpit plugin)
+
+# config file overrides defaults
+# shellcheck source=/dev/null
+[[ -f "$CONFIG_FILE" ]] && . "$CONFIG_FILE"
+
+# environment overrides config (this is how parent -> worker state is passed)
+ROOT="${GHSYNC_ROOT:-$ROOT}"
+OWNERS="${GHSYNC_OWNERS:-$OWNERS}"
+PROTOCOL="${GHSYNC_PROTOCOL:-$PROTOCOL}"
+JOBS="${GHSYNC_JOBS:-$JOBS}"
+QUIET="${GHSYNC_QUIET:-$QUIET}"
+PORCELAIN="${GHSYNC_PORCELAIN:-$PORCELAIN}"
+
+save_config() {
+    cat >"$CONFIG_FILE" <<EOF
+# ghsync configuration — edit by hand or through the TUI
+ROOT="$ROOT"
+OWNERS="$OWNERS"
+PROTOCOL="$PROTOCOL"
+INCLUDE_FORKS=$INCLUDE_FORKS
+INCLUDE_ARCHIVED=$INCLUDE_ARCHIVED
+JOBS=$JOBS
+LIMIT=$LIMIT
+GIT_TIMEOUT=$GIT_TIMEOUT
+EOF
+}
+
+# ------------------------------------------------------------------ output ---
+if [[ -t 1 ]]; then
+    C_RESET=$'\033[0m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'
+    C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_CYAN=$'\033[36m'
+else
+    C_RESET=''; C_DIM=''; C_BOLD=''
+    C_RED=''; C_GREEN=''; C_YELLOW=''; C_CYAN=''
+fi
+
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
+# report TAG COLOR NAME [DETAIL...] -> stdout + logfile + tally
+report() {
+    local tag="$1" color="$2" name="$3"; shift 3
+    local detail="${*:-}"
+    printf '%s  %-11s %s%s\n' "$(ts)" "$tag" "$name" "${detail:+ — $detail}" >>"$LOG_FILE"
+    [[ -n "${GHSYNC_RESULT:-}" ]] && printf '%s\n' "$tag" >>"$GHSYNC_RESULT"
+    if [[ "$PORCELAIN" == true ]]; then
+        printf '%s\t%s\t%s\n' "$tag" "$name" "$detail"
+        return 0
+    fi
+    [[ "$QUIET" == true ]] && return 0
+    printf '  %s%-11s%s %s%s\n' "$color" "$tag" "$C_RESET" "$name" "${detail:+ — $detail}"
+}
+info() {
+    [[ "$QUIET" == true || "$PORCELAIN" == true ]] && return 0
+    printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"
+}
+err()  { printf '%s%s%s\n' "$C_RED" "$*" "$C_RESET" >&2; printf '%s  ERROR       %s\n' "$(ts)" "$*" >>"$LOG_FILE"; }
+
+rotate_log() {
+    local max=$((5 * 1024 * 1024))
+    [[ -f "$LOG_FILE" ]] || return 0
+    local size; size=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+    (( size > max )) && mv -f "$LOG_FILE" "$LOG_FILE.1"
+    return 0
+}
+
+# ----------------------------------------------------------------- helpers ---
+TIMEOUT_BIN="$(command -v timeout || true)"
+run_git() {
+    if [[ -n "$TIMEOUT_BIN" ]]; then "$TIMEOUT_BIN" "$GIT_TIMEOUT" git "$@"
+    else git "$@"; fi
+}
+
+preflight() {
+    local ok=0
+    command -v git >/dev/null || { err "git is not installed."; ok=1; }
+    command -v gh  >/dev/null || { err "GitHub CLI (gh) is not installed — see https://cli.github.com"; ok=1; }
+    (( ok )) && return 1
+    if ! gh auth status >/dev/null 2>&1; then
+        err "gh is not authenticated. Run: gh auth login"
+        return 1
+    fi
+    return 0
+}
+
+acquire_lock() {
+    command -v flock >/dev/null || return 0
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+        err "another ghsync run is already in progress — skipping."
+        return 1
+    fi
+    return 0
+}
+
+# List repos as: <owner/repo>\t<clone-url>
+list_repos() {
+    local filter='.[]'
+    [[ "$INCLUDE_FORKS"    == true ]] || filter+=' | select(.isFork | not)'
+    [[ "$INCLUDE_ARCHIVED" == true ]] || filter+=' | select(.isArchived | not)'
+    if [[ "$PROTOCOL" == "https" ]]; then
+        filter+=' | [.nameWithOwner, (.url + ".git")] | @tsv'
+    else
+        filter+=' | [.nameWithOwner, .sshUrl] | @tsv'
+    fi
+    local fields="nameWithOwner,isFork,isArchived,sshUrl,url"
+    if [[ -z "$OWNERS" ]]; then
+        gh repo list --limit "$LIMIT" --json "$fields" --jq "$filter"
+    else
+        local owner
+        for owner in $OWNERS; do
+            gh repo list "$owner" --limit "$LIMIT" --json "$fields" --jq "$filter"
+        done
+    fi
+}
+
+# Local clones as: <owner/repo>
+local_repos() {
+    [[ -d "$ROOT" ]] || return 0
+    find "$ROOT" -mindepth 2 -maxdepth 3 -name .git -printf '%h\n' 2>/dev/null |
+        sed "s|^$ROOT/||" | sort
+}
+
+# ----------------------------------------------------------- git operations ---
+do_clone() {
+    local name="$1" url="$2" dest="$ROOT/$1" out
+    if [[ -d "$dest/.git" ]]; then
+        report "exists" "$C_DIM" "$name"; return 0
+    fi
+    mkdir -p "$(dirname "$dest")"
+    if out=$(run_git clone --recurse-submodules --quiet "$url" "$dest" 2>&1); then
+        report "cloned" "$C_GREEN" "$name"
+    else
+        report "failed" "$C_RED" "$name" "${out##*$'\n'}"
+        return 1
+    fi
+}
+
+do_pull() {
+    local name="$1" d="$ROOT/$1" out branch upstream before after n
+    [[ -e "$d/.git" ]] || { report "skipped" "$C_DIM" "$name" "not a git repo"; return 0; }
+
+    if ! out=$(run_git -C "$d" fetch --all --prune --tags --quiet 2>&1); then
+        report "failed" "$C_RED" "$name" "fetch: ${out##*$'\n'}"
+        return 1
+    fi
+    if [[ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]]; then
+        report "dirty" "$C_YELLOW" "$name" "fetched, local changes left untouched"
+        return 0
+    fi
+    if ! branch=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+        report "detached" "$C_YELLOW" "$name" "not on a branch"
+        return 0
+    fi
+    if ! upstream=$(git -C "$d" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null); then
+        report "no-upstream" "$C_YELLOW" "$name" "$branch has no tracking branch"
+        return 0
+    fi
+    before=$(git -C "$d" rev-parse HEAD)
+    if out=$(run_git -C "$d" merge --ff-only --quiet "$upstream" 2>&1); then
+        after=$(git -C "$d" rev-parse HEAD)
+        if [[ "$before" == "$after" ]]; then
+            report "up-to-date" "$C_DIM" "$name" "$branch"
+        else
+            n=$(git -C "$d" rev-list --count "$before..$after")
+            [[ -f "$d/.gitmodules" ]] && run_git -C "$d" submodule update --init --recursive --quiet >/dev/null 2>&1
+            report "updated" "$C_GREEN" "$name" "$branch, +$n commits"
+        fi
+    else
+        report "diverged" "$C_YELLOW" "$name" "$branch needs a manual merge or rebase"
+    fi
+}
+
+do_status() {
+    local name="$1" d="$ROOT/$1" branch dirty ahead behind counts
+    [[ -e "$d/.git" ]] || return 0
+    branch=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "detached")
+    dirty=$(git -C "$d" status --porcelain 2>/dev/null | wc -l)
+    ahead=0; behind=0
+    if counts=$(git -C "$d" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null); then
+        ahead=${counts%%[[:space:]]*}; behind=${counts##*[[:space:]]}
+    fi
+    if [[ "$PORCELAIN" == true ]]; then
+        # repo <tab> name <tab> branch <tab> dirty <tab> ahead <tab> behind
+        printf 'repo\t%s\t%s\t%s\t%s\t%s\n' "$name" "$branch" "$dirty" "$ahead" "$behind"
+        [[ -n "${GHSYNC_RESULT:-}" ]] && printf 'repo\n' >>"$GHSYNC_RESULT"
+        return 0
+    fi
+    if (( dirty > 0 || ahead > 0 )); then
+        report "attention" "$C_YELLOW" "$(printf '%-45s %-16s %s dirty, %s ahead, %s behind' "$name" "$branch" "$dirty" "$ahead" "$behind")"
+    else
+        report "clean" "$C_DIM" "$(printf '%-45s %-16s %s behind' "$name" "$branch" "$behind")"
+    fi
+}
+
+# ------------------------------------------------------------ parallel runs ---
+start_run() {
+    RESULT_FILE=$(mktemp "$STATE_DIR/run.XXXXXX")
+    export GHSYNC_RESULT="$RESULT_FILE"
+    export GHSYNC_ROOT="$ROOT" GHSYNC_OWNERS="$OWNERS" GHSYNC_PROTOCOL="$PROTOCOL"
+    export GHSYNC_JOBS="$JOBS" GHSYNC_QUIET="$QUIET" GHSYNC_PORCELAIN="$PORCELAIN"
+    if [[ "$QUIET" == true ]]; then
+        # never hang waiting for a password when running from cron
+        export GIT_TERMINAL_PROMPT=0
+        export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+    fi
+}
+
+finish_run() {
+    local total tag count
+    if [[ -s "$RESULT_FILE" ]]; then
+        total=$(wc -l <"$RESULT_FILE")
+        printf '%s  summary     %s repos\n' "$(ts)" "$total" >>"$LOG_FILE"
+        if [[ "$PORCELAIN" == true ]]; then
+            printf 'summary\t%s\t\n' "$total"
+        elif [[ "$QUIET" != true ]]; then
+            printf '\n  %sSummary%s (%s repos)\n' "$C_BOLD" "$C_RESET" "$total"
+            sort "$RESULT_FILE" | uniq -c | sort -rn | while read -r count tag; do
+                printf '    %5d  %s\n' "$count" "$tag"
+            done
+        fi
+    else
+        info "  Nothing to do."
+    fi
+    rm -f "$RESULT_FILE"
+    unset GHSYNC_RESULT
+}
+
+run_parallel() { # action; input lines on stdin
+    xargs -r -P "$JOBS" -I '{}' "$SELF" _worker "$1" '{}'
+}
+
+# ---------------------------------------------------------------- actions ----
+action_clone() {
+    preflight || return 1
+    acquire_lock || return 1
+    rotate_log
+    info "Listing repositories…"
+    local list; list=$(list_repos) || { err "could not list repositories"; return 1; }
+    [[ -z "$list" ]] && { err "no repositories returned by gh"; return 1; }
+    info "$(wc -l <<<"$list") repositories found. Cloning missing ones into $ROOT"
+    start_run
+    printf '%s\n' "$list" | run_parallel clone
+    finish_run
+}
+
+action_pull() {
+    acquire_lock || return 1
+    rotate_log
+    local list; list=$(local_repos)
+    [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
+    [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
+    info "Updating $(wc -l <<<"$list") local repositories in $ROOT"
+    start_run
+    printf '%s\n' "$list" | run_parallel pull
+    finish_run
+}
+
+action_sync() {
+    action_clone && action_pull
+}
+
+action_status() {
+    local list; list=$(local_repos)
+    [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
+    [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
+    start_run
+    printf '%s\n' "$list" | run_parallel status
+    finish_run
+}
+
+# Machine-readable environment probe used by the Cockpit plugin.
+action_check() {
+    local git_v="" gh_v="" auth="no" user="" cron_line="" n_local=0
+    command -v git >/dev/null && git_v=$(git --version 2>/dev/null | awk '{print $3}')
+    command -v gh  >/dev/null && gh_v=$(gh --version 2>/dev/null | head -1 | awk '{print $3}')
+    if [[ -n "$gh_v" ]] && gh auth status >/dev/null 2>&1; then
+        auth="yes"; user=$(gh api user --jq .login 2>/dev/null || echo "")
+    fi
+    command -v crontab >/dev/null && cron_line=$(crontab -l 2>/dev/null | grep -F "$CRON_TAG")
+    n_local=$(local_repos | grep -c . || true)
+    printf 'check\tgit\t%s\n'    "$git_v"
+    printf 'check\tgh\t%s\n'     "$gh_v"
+    printf 'check\tauth\t%s\n'   "$auth"
+    printf 'check\tuser\t%s\n'   "$user"
+    printf 'check\troot\t%s\n'   "$ROOT"
+    printf 'check\towners\t%s\n' "$OWNERS"
+    printf 'check\tproto\t%s\n'  "$PROTOCOL"
+    printf 'check\tjobs\t%s\n'   "$JOBS"
+    printf 'check\tlimit\t%s\n'  "$LIMIT"
+    printf 'check\tforks\t%s\n'  "$INCLUDE_FORKS"
+    printf 'check\tarchived\t%s\n' "$INCLUDE_ARCHIVED"
+    printf 'check\tlocal\t%s\n'  "$n_local"
+    printf 'check\tcron\t%s\n'   "$cron_line"
+    printf 'check\tlog\t%s\n'    "$LOG_FILE"
+    printf 'check\tconfig\t%s\n' "$CONFIG_FILE"
+}
+
+# ------------------------------------------------------------------- cron ----
+cron_status() {
+    local line
+    line=$(crontab -l 2>/dev/null | grep -F "$CRON_TAG")
+    if [[ "$PORCELAIN" == true ]]; then
+        printf 'cron\t%s\t\n' "$line"
+        return 0
+    fi
+    if [[ -n "$line" ]]; then
+        printf '  %sScheduled:%s %s\n' "$C_GREEN" "$C_RESET" "$line"
+    else
+        printf '  %sNo ghsync cron job installed.%s\n' "$C_DIM" "$C_RESET"
+    fi
+}
+
+cron_install() {
+    local sched="$1" tmp
+    command -v crontab >/dev/null || { err "crontab not found — install cron (e.g. apt install cron)"; return 1; }
+    tmp=$(mktemp)
+    crontab -l 2>/dev/null | grep -vF "$CRON_TAG" >"$tmp"
+    printf '%s %s sync --quiet >>%s 2>&1 %s\n' "$sched" "$SELF" "$LOG_FILE" "$CRON_TAG" >>"$tmp"
+    if crontab "$tmp"; then
+        rm -f "$tmp"
+        printf '  %sInstalled:%s %s %s sync --quiet\n' "$C_GREEN" "$C_RESET" "$sched" "$SELF"
+        printf '  %sLog: %s%s\n' "$C_DIM" "$LOG_FILE" "$C_RESET"
+    else
+        rm -f "$tmp"; err "failed to write crontab"; return 1
+    fi
+}
+
+cron_remove() {
+    local tmp
+    command -v crontab >/dev/null || { err "crontab not found"; return 1; }
+    tmp=$(mktemp)
+    crontab -l 2>/dev/null | grep -vF "$CRON_TAG" >"$tmp"
+    crontab "$tmp" && printf '  %sRemoved.%s\n' "$C_GREEN" "$C_RESET"
+    rm -f "$tmp"
+}
+
+# -------------------------------------------------------------------- TUI ----
+MENU_CHOICE=-1
+
+banner() {
+    clear
+    printf '\n  %s%sghsync%s %s%s — GitHub repository sync%s\n' \
+        "$C_BOLD" "$C_CYAN" "$C_RESET" "$C_DIM" "$VERSION" "$C_RESET"
+    printf '  %s──────────────────────────────────────────────%s\n' "$C_DIM" "$C_RESET"
+    printf '  %sroot%s %s   %sowner%s %s   %sproto%s %s   %sjobs%s %s\n\n' \
+        "$C_DIM" "$C_RESET" "$ROOT" \
+        "$C_DIM" "$C_RESET" "${OWNERS:-<you>}" \
+        "$C_DIM" "$C_RESET" "$PROTOCOL" \
+        "$C_DIM" "$C_RESET" "$JOBS"
+}
+
+menu() { # menu "Title" item...
+    local title="$1"; shift
+    local -a items=("$@")
+    local sel=0 n=${#items[@]} key rest i
+    tput civis 2>/dev/null
+    trap 'tput cnorm 2>/dev/null; exit 130' INT
+    while true; do
+        banner
+        printf '  %s%s%s\n\n' "$C_BOLD" "$title" "$C_RESET"
+        for ((i = 0; i < n; i++)); do
+            if ((i == sel)); then
+                printf '  %s%s❯ %s%s\n' "$C_CYAN" "$C_BOLD" "${items[i]}" "$C_RESET"
+            else
+                printf '    %s\n' "${items[i]}"
+            fi
+        done
+        printf '\n  %s↑/↓ or j/k · Enter to select · q to go back%s\n' "$C_DIM" "$C_RESET"
+        IFS= read -rsn1 key
+        case "$key" in
+            $'\x1b') read -rsn2 -t 0.05 rest
+                     case "$rest" in '[A') ((sel = (sel - 1 + n) % n));;
+                                     '[B') ((sel = (sel + 1) % n));; esac ;;
+            k|K)     ((sel = (sel - 1 + n) % n)) ;;
+            j|J)     ((sel = (sel + 1) % n)) ;;
+            q|Q)     MENU_CHOICE=-1; break ;;
+            '')      MENU_CHOICE=$sel; break ;;
+            [1-9])   (( key <= n )) && { MENU_CHOICE=$((key - 1)); break; } ;;
+        esac
+    done
+    tput cnorm 2>/dev/null
+    trap - INT
+}
+
+pause() { printf '\n  %sPress any key to continue…%s' "$C_DIM" "$C_RESET"; read -rsn1; printf '\n'; }
+
+settings_menu() {
+    local val
+    while true; do
+        menu "Settings — Enter to change, q to go back" \
+            "Root directory      : $ROOT" \
+            "Owners (blank = you): ${OWNERS:-<authenticated user>}" \
+            "Clone protocol      : $PROTOCOL" \
+            "Include forks       : $INCLUDE_FORKS" \
+            "Include archived    : $INCLUDE_ARCHIVED" \
+            "Parallel jobs       : $JOBS" \
+            "Repo limit per owner: $LIMIT"
+        case "$MENU_CHOICE" in
+            0) read -rep "  New root directory: " -i "$ROOT" val && ROOT="${val/#\~/$HOME}" ;;
+            1) read -rep "  Owners (space separated, blank for your own): " -i "$OWNERS" val && OWNERS="$val" ;;
+            2) [[ "$PROTOCOL" == ssh ]] && PROTOCOL=https || PROTOCOL=ssh ;;
+            3) [[ "$INCLUDE_FORKS" == true ]] && INCLUDE_FORKS=false || INCLUDE_FORKS=true ;;
+            4) [[ "$INCLUDE_ARCHIVED" == true ]] && INCLUDE_ARCHIVED=false || INCLUDE_ARCHIVED=true ;;
+            5) read -rep "  Parallel jobs: " -i "$JOBS" val && [[ "$val" =~ ^[0-9]+$ ]] && JOBS="$val" ;;
+            6) read -rep "  Repo limit per owner: " -i "$LIMIT" val && [[ "$val" =~ ^[0-9]+$ ]] && LIMIT="$val" ;;
+            *) save_config; return ;;
+        esac
+        save_config
+    done
+}
+
+cron_menu() {
+    while true; do
+        menu "Scheduled updates (cron)" \
+            "Every hour                (0 * * * *)" \
+            "Every 6 hours             (0 */6 * * *)" \
+            "Every day at 03:00        (0 3 * * *)" \
+            "Every Monday at 09:00     (0 9 * * 1)" \
+            "Custom schedule…" \
+            "Show current cron entry" \
+            "Remove the cron job"
+        local sched=""
+        [[ "$MENU_CHOICE" -ge 0 ]] && banner
+        case "$MENU_CHOICE" in
+            0) cron_install "0 * * * *" ;;
+            1) cron_install "0 */6 * * *" ;;
+            2) cron_install "0 3 * * *" ;;
+            3) cron_install "0 9 * * 1" ;;
+            4) read -rep "  Cron expression: " -i "0 */6 * * *" sched
+               [[ -n "$sched" ]] && cron_install "$sched" ;;
+            5) cron_status ;;
+            6) cron_remove ;;
+            *) return ;;
+        esac
+        pause
+    done
+}
+
+tui() {
+    while true; do
+        menu "What would you like to do?" \
+            "Clone missing repositories" \
+            "Pull updates into existing repositories" \
+            "Full sync (clone missing + pull all)" \
+            "Status overview" \
+            "Scheduled updates (cron)" \
+            "Settings" \
+            "View log" \
+            "Quit"
+        case "$MENU_CHOICE" in
+            0) banner; action_clone;  pause ;;
+            1) banner; action_pull;   pause ;;
+            2) banner; action_sync;   pause ;;
+            3) banner; action_status; pause ;;
+            4) cron_menu ;;
+            5) settings_menu ;;
+            6) if [[ -f "$LOG_FILE" ]]; then ${PAGER:-less} +G "$LOG_FILE"; else banner; info "  No log yet."; pause; fi ;;
+            *) clear; return 0 ;;
+        esac
+    done
+}
+
+# ------------------------------------------------------------------- usage ---
+usage() {
+    cat <<EOF
+ghsync $VERSION — clone and update all your GitHub repositories.
+
+Usage:
+  ghsync                          launch the interactive TUI
+  ghsync clone                    clone every repo missing from \$ROOT
+  ghsync pull                     fetch + fast-forward every local repo
+  ghsync sync                     clone missing, then pull everything
+  ghsync status                   per-repo branch / dirty / ahead-behind
+  ghsync cron install "0 */6 * * *"
+  ghsync cron remove
+  ghsync cron status
+  ghsync config                   print the current configuration
+  ghsync check                    machine-readable environment probe
+
+Options:
+  --root DIR      repo root (default: $ROOT)
+  --owner NAME    owner/org to sync; repeatable, default is your own repos
+  --jobs N        parallel git operations (default: $JOBS)
+  --ssh|--https   clone protocol (default: $PROTOCOL)
+  --forks         include forks
+  --archived      include archived repos
+  -q, --quiet     no stdout, log only (used by the cron job)
+  --porcelain     tab-separated output: TAG<TAB>NAME<TAB>DETAIL
+  -h, --help      this text
+
+Config: $CONFIG_FILE
+Log:    $LOG_FILE
+EOF
+}
+
+# -------------------------------------------------------------------- main ---
+# hidden worker entry point used by xargs
+if [[ "${1:-}" == "_worker" ]]; then
+    case "$2" in
+        clone)  IFS=$'\t' read -r _n _u <<<"$3"; do_clone "$_n" "$_u" ;;
+        pull)   do_pull  "$3" ;;
+        status) do_status "$3" ;;
+    esac
+    exit $?
+fi
+
+declare -a POS=() OWNER_ARGS=()
+while (($#)); do
+    case "$1" in
+        --root)     ROOT="${2/#\~/$HOME}"; shift 2 ;;
+        --owner)    OWNER_ARGS+=("$2"); shift 2 ;;
+        --jobs)     JOBS="$2"; shift 2 ;;
+        --limit)    LIMIT="$2"; shift 2 ;;
+        --ssh)      PROTOCOL=ssh; shift ;;
+        --https)    PROTOCOL=https; shift ;;
+        --forks)    INCLUDE_FORKS=true; shift ;;
+        --archived) INCLUDE_ARCHIVED=true; shift ;;
+        -q|--quiet) QUIET=true; shift ;;
+        --porcelain) PORCELAIN=true; shift ;;
+        -h|--help)  usage; exit 0 ;;
+        -*)         err "unknown option: $1"; usage; exit 1 ;;
+        *)          POS+=("$1"); shift ;;
+    esac
+done
+((${#OWNER_ARGS[@]})) && OWNERS="${OWNER_ARGS[*]}"
+
+CMD="${POS[0]:-}"
+SUB="${POS[1]:-}"
+FILTER=""
+case "$CMD" in pull|update|status) FILTER="$SUB" ;; esac
+SCHED="${POS[2]:-0 */6 * * *}"
+
+case "$CMD" in
+    ""|tui)       preflight || exit 1; tui ;;
+    clone)        action_clone ;;
+    pull|update)  action_pull ;;
+    sync)         action_sync ;;
+    status)       action_status ;;
+    check)        action_check ;;
+    config)       [[ -f "$CONFIG_FILE" ]] || save_config; cat "$CONFIG_FILE" ;;
+    cron)
+        case "$SUB" in
+            install) cron_install "$SCHED" ;;
+            remove|uninstall) cron_remove ;;
+            *)       cron_status ;;
+        esac ;;
+    *) err "unknown command: $CMD"; usage; exit 1 ;;
+esac

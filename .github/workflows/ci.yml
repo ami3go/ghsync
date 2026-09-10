@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint shell, JS and JSON
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: shellcheck
+        run: shellcheck bin/ghsync install.sh
+
+      - name: bash syntax
+        run: bash -n bin/ghsync && bash -n install.sh
+
+      - name: JavaScript syntax
+        run: node --check cockpit/ghsync.js
+
+      - name: Cockpit manifest is valid JSON
+        run: python3 -m json.tool cockpit/manifest.json > /dev/null
+
+      - name: Cockpit page DOM test
+        run: |
+          npm install --no-save jsdom
+          node test/ui-test.js
+
+  install:
+    name: Install smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install for the runner user
+        run: ./install.sh
+
+      - name: Command and Cockpit page are in place
+        run: |
+          test -x "$HOME/.local/bin/ghsync"
+          test -f "$HOME/.local/share/cockpit/ghsync/manifest.json"
+          test -x "$HOME/.local/share/cockpit/ghsync/ghsync"
+
+      - name: Script runs without gh configured
+        run: |
+          "$HOME/.local/bin/ghsync" --help
+          "$HOME/.local/bin/ghsync" config
+          "$HOME/.local/bin/ghsync" check
+
+      - name: Clone, pull and status against a local fixture
+        run: |
+          set -e
+          git config --global user.email ci@example.com
+          git config --global user.name CI
+          git config --global init.defaultBranch main
+          mkdir -p /tmp/fixture/acme
+          git init -q --bare /tmp/remote.git
+          git clone -q /tmp/remote.git /tmp/work
+          cd /tmp/work && echo hello > file.txt && git add . && git commit -qm first && git push -q origin main
+          git clone -q /tmp/remote.git /tmp/fixture/acme/demo
+          cd /tmp/work && echo again >> file.txt && git commit -qam second && git push -q origin main
+          GHSYNC_ROOT=/tmp/fixture "$HOME/.local/bin/ghsync" pull --porcelain | tee /tmp/out
+          grep -q '^updated' /tmp/out
+
+      - name: Uninstall cleanly
+        run: |
+          ./install.sh --uninstall
+          test ! -e "$HOME/.local/bin/ghsync"

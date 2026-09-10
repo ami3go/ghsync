@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>GitHub Sync</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="ghsync.css">
+    <script src="../base1/cockpit.js"></script>
+</head>
+<body>
+
+<svg class="ghs-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-check" viewBox="0 0 16 16">
+        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.6 5.2l-4.1 4.6a.7.7 0 01-1 .04L4.4 8.8a.7.7 0 01.95-1.02l1.55 1.44 3.65-4.1a.7.7 0 011.05.92z"/>
+    </symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16">
+        <path d="M8.7 1.4l6.2 11.6a.8.8 0 01-.7 1.2H1.8a.8.8 0 01-.7-1.2L7.3 1.4a.8.8 0 011.4 0zM8 5a.7.7 0 00-.7.75l.2 3.1a.5.5 0 001 0l.2-3.1A.7.7 0 008 5zm0 5.6a.85.85 0 100 1.7.85.85 0 000-1.7z"/>
+    </symbol>
+    <symbol id="i-error" viewBox="0 0 16 16">
+        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3 9.05l-.95.95L8 8.95 5.95 11 5 10.05 7.05 8 5 5.95 5.95 5 8 7.05 10.05 5l.95.95L8.95 8z"/>
+    </symbol>
+    <symbol id="i-info" viewBox="0 0 16 16">
+        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2.4a1.05 1.05 0 110 2.1 1.05 1.05 0 010-2.1zM9.5 12h-3a.5.5 0 010-1h.75V7.9H6.7a.5.5 0 010-1h1.55c.28 0 .5.22.5.5V11h.75a.5.5 0 010 1z"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 16 16">
+        <path d="M15.7 14.3l-3.4-3.4a6 6 0 10-1.4 1.4l3.4 3.4a1 1 0 001.4-1.4zM2 7a5 5 0 1110 0A5 5 0 012 7z"/>
+    </symbol>
+    <symbol id="i-repo" viewBox="0 0 16 16">
+        <path d="M12.5 0h-9A1.5 1.5 0 002 1.5v13A1.5 1.5 0 003.5 16h9a1.5 1.5 0 001.5-1.5v-13A1.5 1.5 0 0012.5 0zM4 2h4v5L6 5.8 4 7V2z"/>
+    </symbol>
+</svg>
+
+<div class="ghs-page">
+
+    <section class="ghs-page-section ghs-page-section--light">
+        <h1 class="ghs-title">GitHub Sync</h1>
+        <p class="ghs-subtitle">Clone and update the GitHub repositories for this account.</p>
+    </section>
+
+    <section class="ghs-page-section">
+
+        <div id="alerts" class="ghs-alerts"></div>
+
+        <article class="ghs-card">
+            <div class="ghs-card__header">
+                <h2 class="ghs-card__title">Overview</h2>
+                <div class="ghs-card__actions">
+                    <span id="busy" class="ghs-spinner ghs-hidden" role="progressbar" aria-label="Working"></span>
+                    <button id="btn-clone" class="ghs-btn ghs-btn--primary" type="button">Clone missing</button>
+                    <button id="btn-pull" class="ghs-btn ghs-btn--secondary" type="button">Pull updates</button>
+                    <button id="btn-sync" class="ghs-btn ghs-btn--secondary" type="button">Full sync</button>
+                    <button id="btn-refresh" class="ghs-btn ghs-btn--link" type="button">Refresh</button>
+                    <button id="btn-cancel" class="ghs-btn ghs-btn--danger ghs-hidden" type="button">Cancel</button>
+                </div>
+            </div>
+            <div class="ghs-card__body">
+                <dl class="ghs-dl">
+                    <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">GitHub CLI</dt>
+                        <dd class="ghs-dl__desc" id="v-gh">&mdash;</dd>
+                    </div>
+                    <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">Account</dt>
+                        <dd class="ghs-dl__desc" id="v-user">&mdash;</dd>
+                    </div>
+                    <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">Repository root</dt>
+                        <dd class="ghs-dl__desc"><span class="ghs-mono" id="v-root">&mdash;</span></dd>
+                    </div>
+                    <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">Local clones</dt>
+                        <dd class="ghs-dl__desc" id="v-local">&mdash;</dd>
+                    </div>
+                    <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">Needs attention</dt>
+                        <dd class="ghs-dl__desc" id="v-attention">&mdash;</dd>
+                    </div>
+                    <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">Schedule</dt>
+                        <dd class="ghs-dl__desc" id="v-cron">&mdash;</dd>
+                    </div>
+                </dl>
+            </div>
+        </article>
+
+        <article class="ghs-card">
+            <div class="ghs-tabs" role="tablist">
+                <button class="ghs-tab ghs-tab--current" role="tab" data-tab="repos" aria-selected="true" type="button">Repositories</button>
+                <button class="ghs-tab" role="tab" data-tab="activity" aria-selected="false" type="button">Activity</button>
+                <button class="ghs-tab" role="tab" data-tab="settings" aria-selected="false" type="button">Settings</button>
+                <button class="ghs-tab" role="tab" data-tab="schedule" aria-selected="false" type="button">Schedule</button>
+            </div>
+
+            <section class="ghs-tab-panel" id="panel-repos" role="tabpanel">
+                <div class="ghs-toolbar">
+                    <div class="ghs-search">
+                        <svg class="ghs-search__icon" aria-hidden="true"><use href="#i-search"/></svg>
+                        <input id="filter" class="ghs-input ghs-search__input" type="search"
+                               placeholder="Filter by name" aria-label="Filter repositories">
+                    </div>
+                    <span class="ghs-toolbar__spacer"></span>
+                    <span class="ghs-toolbar__count" id="repo-count"></span>
+                </div>
+                <div class="ghs-table-wrap">
+                    <table class="ghs-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Repository</th>
+                                <th scope="col">Branch</th>
+                                <th scope="col">State</th>
+                                <th scope="col" class="ghs-num">Uncommitted</th>
+                                <th scope="col" class="ghs-num">Ahead</th>
+                                <th scope="col" class="ghs-num">Behind</th>
+                                <th scope="col" class="ghs-table__action"><span class="ghs-sr">Actions</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="repos"></tbody>
+                    </table>
+                </div>
+                <div id="repos-empty" class="ghs-empty ghs-hidden">
+                    <svg class="ghs-empty__icon" aria-hidden="true"><use href="#i-repo"/></svg>
+                    <h3 class="ghs-empty__title">No repositories yet</h3>
+                    <p class="ghs-empty__body" id="repos-empty-body">Nothing has been cloned into the repository root.</p>
+                    <button class="ghs-btn ghs-btn--primary" type="button" id="btn-empty-clone">Clone missing</button>
+                </div>
+            </section>
+
+            <section class="ghs-tab-panel ghs-hidden" id="panel-activity" role="tabpanel">
+                <div class="ghs-toolbar">
+                    <span id="counters" class="ghs-chips"></span>
+                    <span class="ghs-toolbar__spacer"></span>
+                    <button id="btn-log" class="ghs-btn ghs-btn--secondary ghs-btn--sm" type="button">Load log file</button>
+                </div>
+                <pre id="console" class="ghs-log" aria-live="polite" tabindex="0"></pre>
+            </section>
+
+            <section class="ghs-tab-panel ghs-hidden" id="panel-settings" role="tabpanel">
+                <div class="ghs-form">
+                    <div class="ghs-form-group">
+                        <label class="ghs-label" for="f-root">Repository root</label>
+                        <input id="f-root" class="ghs-input" type="text" placeholder="/home/user/github">
+                        <p class="ghs-helper">Clones are stored as <span class="ghs-mono">root/owner/repository</span>.</p>
+                    </div>
+                    <div class="ghs-form-group">
+                        <label class="ghs-label" for="f-owners">Owners and organisations</label>
+                        <input id="f-owners" class="ghs-input" type="text" placeholder="leave empty for your own repositories">
+                        <p class="ghs-helper">Space separated. Empty means the repositories of the signed-in account.</p>
+                    </div>
+                    <div class="ghs-form-row">
+                        <div class="ghs-form-group">
+                            <label class="ghs-label" for="f-proto">Clone protocol</label>
+                            <select id="f-proto" class="ghs-input">
+                                <option value="ssh">SSH</option>
+                                <option value="https">HTTPS</option>
+                            </select>
+                        </div>
+                        <div class="ghs-form-group">
+                            <label class="ghs-label" for="f-jobs">Parallel jobs</label>
+                            <input id="f-jobs" class="ghs-input" type="number" min="1" max="32">
+                        </div>
+                        <div class="ghs-form-group">
+                            <label class="ghs-label" for="f-limit">Repository limit per owner</label>
+                            <input id="f-limit" class="ghs-input" type="number" min="1" max="5000">
+                        </div>
+                    </div>
+                    <div class="ghs-form-group">
+                        <span class="ghs-label">Included repositories</span>
+                        <label class="ghs-switch">
+                            <input id="f-forks" type="checkbox">
+                            <span class="ghs-switch__track"><span class="ghs-switch__thumb"></span></span>
+                            <span class="ghs-switch__text">Forks</span>
+                        </label>
+                        <label class="ghs-switch">
+                            <input id="f-archived" type="checkbox">
+                            <span class="ghs-switch__track"><span class="ghs-switch__thumb"></span></span>
+                            <span class="ghs-switch__text">Archived repositories</span>
+                        </label>
+                    </div>
+                    <div class="ghs-form-actions">
+                        <button id="btn-save" class="ghs-btn ghs-btn--primary" type="button">Save</button>
+                        <button id="btn-reset" class="ghs-btn ghs-btn--link" type="button">Reset</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="ghs-tab-panel ghs-hidden" id="panel-schedule" role="tabpanel">
+                <div class="ghs-form">
+                    <div class="ghs-form-group">
+                        <span class="ghs-label">Current schedule</span>
+                        <p class="ghs-mono ghs-schedule-line" id="cron-line">No scheduled updates.</p>
+                    </div>
+                    <div class="ghs-form-group">
+                        <label class="ghs-label" for="f-sched">Run a full sync</label>
+                        <select id="f-sched" class="ghs-input ghs-input--narrow">
+                            <option value="0 * * * *">Every hour</option>
+                            <option value="0 */6 * * *" selected>Every 6 hours</option>
+                            <option value="0 3 * * *">Every day at 03:00</option>
+                            <option value="0 9 * * 1">Every Monday at 09:00</option>
+                            <option value="custom">Custom&hellip;</option>
+                        </select>
+                    </div>
+                    <div class="ghs-form-group ghs-hidden" id="g-custom">
+                        <label class="ghs-label" for="f-custom">Cron expression</label>
+                        <input id="f-custom" class="ghs-input ghs-input--narrow ghs-mono" type="text" placeholder="0 */6 * * *">
+                        <p class="ghs-helper">Five fields: minute, hour, day of month, month, day of week.</p>
+                    </div>
+                    <div class="ghs-form-actions">
+                        <button id="btn-cron-install" class="ghs-btn ghs-btn--primary" type="button">Save schedule</button>
+                        <button id="btn-cron-remove" class="ghs-btn ghs-btn--secondary ghs-btn--danger-text" type="button">Remove schedule</button>
+                    </div>
+                    <p class="ghs-helper">
+                        The job runs <span class="ghs-mono">ghsync sync --quiet</span> as this user and keeps running
+                        when the browser is closed. Because cron has no terminal, an SSH key with a passphrase cannot
+                        be used &mdash; choose HTTPS or a passphrase-less key.
+                    </p>
+                </div>
+            </section>
+        </article>
+
+    </section>
+</div>
+
+<script src="ghsync.js"></script>
+</body>
+</html>

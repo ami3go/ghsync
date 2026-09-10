@@ -1,0 +1,16 @@
+# editor / OS noise
+*~
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# build & packaging output
+dist/
+*.zip
+*.tar.gz
+
+# local state
+*.log
+node_modules/
+package-lock.json
