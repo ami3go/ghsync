@@ -37,6 +37,11 @@ INCLUDE_ARCHIVED=false
 JOBS=4                    # parallel git operations
 LIMIT=1000                # max repos fetched per owner
 GIT_TIMEOUT=600           # seconds per git operation
+HOST=""                   # GitHub Enterprise host, empty = github.com
+CLONE_FILTER="blob:none"  # blob:none | tree:0 | depth:N | none
+MIRROR=false              # bare mirrors instead of working trees
+EXCLUDE=""                # glob patterns to skip, e.g. "acme/huge-* */fork-*"
+NOTIFY=true               # send failures to the journal
 QUIET=false
 PORCELAIN=false           # tab-separated machine output (used by the Cockpit plugin)
 
@@ -51,6 +56,11 @@ PROTOCOL="${GHSYNC_PROTOCOL:-$PROTOCOL}"
 JOBS="${GHSYNC_JOBS:-$JOBS}"
 QUIET="${GHSYNC_QUIET:-$QUIET}"
 PORCELAIN="${GHSYNC_PORCELAIN:-$PORCELAIN}"
+HOST="${GHSYNC_HOST:-$HOST}"
+CLONE_FILTER="${GHSYNC_CLONE_FILTER:-$CLONE_FILTER}"
+MIRROR="${GHSYNC_MIRROR:-$MIRROR}"
+EXCLUDE="${GHSYNC_EXCLUDE:-$EXCLUDE}"
+[[ -n "$HOST" ]] && export GH_HOST="$HOST"
 
 save_config() {
     cat >"$CONFIG_FILE" <<EOF
@@ -63,6 +73,11 @@ INCLUDE_ARCHIVED=$INCLUDE_ARCHIVED
 JOBS=$JOBS
 LIMIT=$LIMIT
 GIT_TIMEOUT=$GIT_TIMEOUT
+HOST="$HOST"
+CLONE_FILTER="$CLONE_FILTER"
+MIRROR=$MIRROR
+EXCLUDE="$EXCLUDE"
+NOTIFY=$NOTIFY
 EOF
 }
 
@@ -145,45 +160,134 @@ list_repos() {
     fi
     local fields="nameWithOwner,isFork,isArchived,sshUrl,url"
     if [[ -z "$OWNERS" ]]; then
-        gh repo list --limit "$LIMIT" --json "$fields" --jq "$filter"
+        gh repo list --limit "$LIMIT" --json "$fields" --jq "$filter" | filter_excluded
     else
         local owner
         for owner in $OWNERS; do
             gh repo list "$owner" --limit "$LIMIT" --json "$fields" --jq "$filter"
-        done
+        done | filter_excluded
     fi
 }
 
-# Local clones as: <owner/repo>
+# Local clones as: <owner/repo>. Covers working trees and bare mirrors.
 local_repos() {
     [[ -d "$ROOT" ]] || return 0
-    find "$ROOT" -mindepth 2 -maxdepth 3 -name .git -printf '%h\n' 2>/dev/null |
-        sed "s|^$ROOT/||" | sort
+    {
+        find "$ROOT" -mindepth 2 -maxdepth 3 -name .git -printf '%h\n' 2>/dev/null
+        find "$ROOT" -mindepth 2 -maxdepth 2 -type d -name '*.git' -printf '%p\n' 2>/dev/null |
+            sed 's|\.git$||'
+    } | sed "s|^$ROOT/||" | sort -u | filter_excluded
+}
+
+# Where a repository lives, working tree or mirror.
+repo_path() {
+    if [[ -e "$ROOT/$1/.git" ]]; then printf '%s\n' "$ROOT/$1"
+    elif [[ -d "$ROOT/$1.git" ]]; then printf '%s\n' "$ROOT/$1.git"
+    fi
+}
+
+is_bare() { [[ "$(git -C "$1" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]]; }
+
+# Drop lines whose first field matches an EXCLUDE pattern.
+filter_excluded() {
+    local line name pat keep
+    if [[ -z "$EXCLUDE" ]]; then cat; return 0; fi
+    while IFS= read -r line; do
+        name="${line%%$'\t'*}"
+        keep=true
+        for pat in $EXCLUDE; do
+            # shellcheck disable=SC2053  # deliberate glob match, not a literal
+            if [[ "$name" == $pat ]]; then keep=false; break; fi
+        done
+        [[ "$keep" == true ]] && printf '%s\n' "$line"
+    done
+    return 0
+}
+
+# Count work that exists only on this machine: stashes and unpushed branches.
+local_only_work() {
+    local d="$1" stashes=0 unpushed=0 br up track
+    stashes=$(git -C "$d" stash list 2>/dev/null | wc -l)
+    while read -r br up track; do
+        [[ -z "$br" ]] && continue
+        if [[ -z "$up" ]]; then
+            unpushed=$((unpushed + 1))
+        elif [[ "$track" == *ahead* ]]; then
+            unpushed=$((unpushed + 1))
+        fi
+    done < <(git -C "$d" for-each-ref --format='%(refname:short) %(upstream:short) %(upstream:track)' \
+                 refs/heads 2>/dev/null)
+    printf '%s %s\n' "$stashes" "$unpushed"
+}
+
+notify() {
+    [[ "$NOTIFY" == true ]] || return 0
+    if command -v systemd-cat >/dev/null; then
+        printf '%s\n' "$*" | systemd-cat -t ghsync -p err
+    elif command -v logger >/dev/null; then
+        logger -t ghsync -p user.err -- "$*"
+    fi
+    return 0
 }
 
 # ----------------------------------------------------------- git operations ---
 do_clone() {
-    local name="$1" url="$2" dest="$ROOT/$1" out
-    if [[ -d "$dest/.git" ]]; then
+    local name="$1" url="$2" dest out
+    local -a args=()
+    if [[ "$MIRROR" == true ]]; then
+        dest="$ROOT/$name.git"
+        args=(--mirror --quiet)
+    else
+        dest="$ROOT/$name"
+        args=(--recurse-submodules --quiet)
+        case "$CLONE_FILTER" in
+            blob:none|tree:0) args+=(--filter="$CLONE_FILTER") ;;
+            depth:*)          args+=(--depth "${CLONE_FILTER#depth:}" --no-single-branch) ;;
+            *)                : ;;
+        esac
+    fi
+    if [[ -n "$(repo_path "$name")" ]]; then
         report "exists" "$C_DIM" "$name"; return 0
     fi
     mkdir -p "$(dirname "$dest")"
-    if out=$(run_git clone --recurse-submodules --quiet "$url" "$dest" 2>&1); then
+    if out=$(run_git clone "${args[@]}" "$url" "$dest" 2>&1); then
         report "cloned" "$C_GREEN" "$name"
     else
         report "failed" "$C_RED" "$name" "${out##*$'\n'}"
+        [[ -n "${GHSYNC_FAILED:-}" ]] && printf 'clone\t%s\t%s\n' "$name" "$url" >>"$GHSYNC_FAILED"
         return 1
     fi
 }
 
 do_pull() {
-    local name="$1" d="$ROOT/$1" out branch upstream before after n
-    [[ -e "$d/.git" ]] || { report "skipped" "$C_DIM" "$name" "not a git repo"; return 0; }
+    local name="$1" d out branch upstream before after n counts stashes unpushed
+    d=$(repo_path "$name")
+    [[ -n "$d" ]] || { report "skipped" "$C_DIM" "$name" "not a git repo"; return 0; }
+
+    if is_bare "$d"; then
+        if out=$(run_git -C "$d" remote update --prune 2>&1); then
+            report "updated" "$C_GREEN" "$name" "mirror refreshed"
+        else
+            report "failed" "$C_RED" "$name" "${out##*$'\n'}"
+            [[ -n "${GHSYNC_FAILED:-}" ]] && printf 'pull\t%s\t\n' "$name" >>"$GHSYNC_FAILED"
+            return 1
+        fi
+        return 0
+    fi
 
     if ! out=$(run_git -C "$d" fetch --all --prune --tags --quiet 2>&1); then
         report "failed" "$C_RED" "$name" "fetch: ${out##*$'\n'}"
+        [[ -n "${GHSYNC_FAILED:-}" ]] && printf 'pull\t%s\t\n' "$name" >>"$GHSYNC_FAILED"
         return 1
     fi
+
+    counts=$(local_only_work "$d")
+    stashes=${counts%% *}
+    unpushed=${counts##* }
+    if [[ -n "${GHSYNC_UNPUSHED:-}" ]] && (( stashes > 0 || unpushed > 0 )); then
+        printf '%s\t%s\t%s\n' "$name" "$stashes" "$unpushed" >>"$GHSYNC_UNPUSHED"
+    fi
+
     if [[ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]]; then
         report "dirty" "$C_YELLOW" "$name" "fetched, local changes left untouched"
         return 0
@@ -212,33 +316,76 @@ do_pull() {
 }
 
 do_status() {
-    local name="$1" d="$ROOT/$1" branch dirty ahead behind counts
-    [[ -e "$d/.git" ]] || return 0
-    branch=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "detached")
-    dirty=$(git -C "$d" status --porcelain 2>/dev/null | wc -l)
-    ahead=0; behind=0
-    if counts=$(git -C "$d" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null); then
-        ahead=${counts%%[[:space:]]*}; behind=${counts##*[[:space:]]}
+    local name="$1" d branch dirty ahead behind counts stashes unpushed work
+    d=$(repo_path "$name")
+    [[ -n "$d" ]] || return 0
+
+    if is_bare "$d"; then
+        branch="mirror"; dirty=0; ahead=0; behind=0; stashes=0; unpushed=0
+    else
+        branch=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "detached")
+        dirty=$(git -C "$d" status --porcelain 2>/dev/null | wc -l)
+        ahead=0; behind=0
+        if counts=$(git -C "$d" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null); then
+            ahead=${counts%%[[:space:]]*}; behind=${counts##*[[:space:]]}
+        fi
+        work=$(local_only_work "$d")
+        stashes=${work%% *}
+        unpushed=${work##* }
     fi
+
     if [[ "$PORCELAIN" == true ]]; then
-        # repo <tab> name <tab> branch <tab> dirty <tab> ahead <tab> behind
-        printf 'repo\t%s\t%s\t%s\t%s\t%s\n' "$name" "$branch" "$dirty" "$ahead" "$behind"
+        printf 'repo\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$name" "$branch" "$dirty" "$ahead" "$behind" "$stashes" "$unpushed"
         [[ -n "${GHSYNC_RESULT:-}" ]] && printf 'repo\n' >>"$GHSYNC_RESULT"
         return 0
     fi
-    if (( dirty > 0 || ahead > 0 )); then
-        report "attention" "$C_YELLOW" "$(printf '%-45s %-16s %s dirty, %s ahead, %s behind' "$name" "$branch" "$dirty" "$ahead" "$behind")"
+    if (( dirty > 0 || ahead > 0 || stashes > 0 || unpushed > 0 )); then
+        report "attention" "$C_YELLOW" "$(printf '%-40s %-14s %s dirty, %s ahead, %s behind, %s stashed, %s unpushed' \
+            "$name" "$branch" "$dirty" "$ahead" "$behind" "$stashes" "$unpushed")"
     else
-        report "clean" "$C_DIM" "$(printf '%-45s %-16s %s behind' "$name" "$branch" "$behind")"
+        report "clean" "$C_DIM" "$(printf '%-40s %-14s %s behind' "$name" "$branch" "$behind")"
     fi
+}
+
+do_stats() {
+    local name="$1" d commits branches tags last author when size
+    d=$(repo_path "$name")
+    [[ -n "$d" ]] || return 0
+    commits=$(git -C "$d" rev-list --count HEAD 2>/dev/null || echo 0)
+    branches=$(git -C "$d" for-each-ref --format='%(refname)' refs/heads 2>/dev/null | wc -l)
+    tags=$(git -C "$d" for-each-ref --format='%(refname)' refs/tags 2>/dev/null | wc -l)
+    last=$(git -C "$d" log -1 --format=%ct 2>/dev/null || echo 0)
+    author=$(git -C "$d" log -1 --format=%an 2>/dev/null || echo "")
+    size=$(du -sk "$d" 2>/dev/null | cut -f1)
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    if [[ "$PORCELAIN" == true ]]; then
+        # stat name commits branches tags epoch author size-in-kb
+        printf 'stat\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$name" "$commits" "$branches" "$tags" "$last" "$author" "$size"
+        [[ -n "${GHSYNC_RESULT:-}" ]] && printf 'stat\n' >>"$GHSYNC_RESULT"
+        return 0
+    fi
+    if [[ "$last" -gt 0 ]]; then
+        when=$(date -d "@$last" '+%Y-%m-%d' 2>/dev/null || echo "?")
+    else
+        when="never"
+    fi
+    report "stat" "$C_DIM" "$(printf '%-40s %7s commits %3s branches %3s tags %8s MiB  %s' \
+        "$name" "$commits" "$branches" "$tags" "$((size / 1024))" "$when")"
 }
 
 # ------------------------------------------------------------ parallel runs ---
 start_run() {
     RESULT_FILE=$(mktemp "$STATE_DIR/run.XXXXXX")
-    export GHSYNC_RESULT="$RESULT_FILE"
+    UNPUSHED_FILE=$(mktemp "$STATE_DIR/unpushed.XXXXXX")
+    FAILED_FILE="$STATE_DIR/failed.tsv"
+    : >"$FAILED_FILE"
+    export GHSYNC_RESULT="$RESULT_FILE" GHSYNC_UNPUSHED="$UNPUSHED_FILE" GHSYNC_FAILED="$FAILED_FILE"
     export GHSYNC_ROOT="$ROOT" GHSYNC_OWNERS="$OWNERS" GHSYNC_PROTOCOL="$PROTOCOL"
     export GHSYNC_JOBS="$JOBS" GHSYNC_QUIET="$QUIET" GHSYNC_PORCELAIN="$PORCELAIN"
+    export GHSYNC_HOST="$HOST" GHSYNC_CLONE_FILTER="$CLONE_FILTER" GHSYNC_MIRROR="$MIRROR"
+    export GHSYNC_EXCLUDE="$EXCLUDE"
     if [[ "$QUIET" == true ]]; then
         # never hang waiting for a password when running from cron
         export GIT_TERMINAL_PROMPT=0
@@ -262,8 +409,39 @@ finish_run() {
     else
         info "  Nothing to do."
     fi
-    rm -f "$RESULT_FILE"
-    unset GHSYNC_RESULT
+    warn_unpushed
+    warn_failures
+    rm -f "$RESULT_FILE" "$UNPUSHED_FILE"
+    unset GHSYNC_RESULT GHSYNC_UNPUSHED GHSYNC_FAILED
+}
+
+# Work that exists only on this machine is the one thing a sync cannot fix.
+warn_unpushed() {
+    [[ -s "${UNPUSHED_FILE:-/dev/null}" ]] || return 0
+    local n name stashes unpushed detail
+    n=$(wc -l <"$UNPUSHED_FILE")
+    while IFS=$'\t' read -r name stashes unpushed; do
+        detail=""
+        (( unpushed > 0 )) && detail="$unpushed unpushed branch(es)"
+        (( stashes > 0 )) && detail="${detail:+$detail, }$stashes stash(es)"
+        report "local-only" "$C_YELLOW" "$name" "$detail"
+    done <"$UNPUSHED_FILE"
+    printf '%s  local-only  %s repositories hold work that exists only here\n' "$(ts)" "$n" >>"$LOG_FILE"
+    if [[ "$PORCELAIN" != true && "$QUIET" != true ]]; then
+        local noun="repositories hold"; (( n == 1 )) && noun="repository holds"
+        printf '\n  %s%s %s work that exists only on this machine.%s\n' \
+            "$C_YELLOW" "$n" "$noun" "$C_RESET"
+    fi
+}
+
+warn_failures() {
+    [[ -s "${FAILED_FILE:-/dev/null}" ]] || return 0
+    local n; n=$(wc -l <"$FAILED_FILE")
+    notify "ghsync: $n repository operation(s) failed on $(hostname 2>/dev/null || echo host)"
+    if [[ "$PORCELAIN" != true && "$QUIET" != true ]]; then
+        printf '  %s%s operation(s) failed. Retry just those with: ghsync retry%s\n' \
+            "$C_RED" "$n" "$C_RESET"
+    fi
 }
 
 run_parallel() { # action; input lines on stdin
@@ -282,6 +460,14 @@ action_clone() {
     start_run
     printf '%s\n' "$list" | run_parallel clone
     finish_run
+    local orphans
+    orphans=$(comm -23 <(local_repos) <(printf '%s\n' "$list" | cut -f1 | sort) 2>/dev/null)
+    if [[ -n "$orphans" ]]; then
+        local n
+        while IFS= read -r n; do
+            [[ -n "$n" ]] && report "orphan" "$C_YELLOW" "$n" "not returned by GitHub any more"
+        done <<<"$orphans"
+    fi
 }
 
 action_pull() {
@@ -306,6 +492,52 @@ action_status() {
     [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
     start_run
     printf '%s\n' "$list" | run_parallel status
+    finish_run
+}
+
+# Re-run only what failed last time, instead of walking every repository again.
+action_retry() {
+    local failed="$STATE_DIR/failed.tsv"
+    [[ -s "$failed" ]] || { info "Nothing to retry."; return 0; }
+    acquire_lock || return 1
+    local clones pulls
+    clones=$(awk -F'\t' '$1 == "clone" { print $2 "\t" $3 }' "$failed")
+    pulls=$(awk -F'\t' '$1 == "pull" { print $2 }' "$failed")
+    info "Retrying $(wc -l <"$failed") failed operation(s)"
+    start_run
+    [[ -n "$clones" ]] && printf '%s\n' "$clones" | run_parallel clone
+    [[ -n "$pulls" ]] && printf '%s\n' "$pulls" | run_parallel pull
+    finish_run
+}
+
+# Clones that are no longer returned by the GitHub API: renamed, transferred or deleted.
+action_orphans() {
+    preflight || return 1
+    local remote local_list orphans
+    remote=$(list_repos | cut -f1 | sort) || { err "could not list repositories"; return 1; }
+    local_list=$(local_repos)
+    [[ -z "$local_list" ]] && { info "No local clones."; return 0; }
+    orphans=$(comm -23 <(printf '%s\n' "$local_list") <(printf '%s\n' "$remote"))
+    if [[ -z "$orphans" ]]; then
+        info "No orphaned clones."
+        return 0
+    fi
+    local n
+    while IFS= read -r n; do
+        [[ -n "$n" ]] && report "orphan" "$C_YELLOW" "$n" "not returned by GitHub any more"
+    done <<<"$orphans"
+    if [[ "$PORCELAIN" != true && "$QUIET" != true ]]; then
+        printf '\n  %sThese were renamed, transferred or deleted. Nothing was removed locally.%s\n' \
+            "$C_DIM" "$C_RESET"
+    fi
+}
+
+action_stats() {
+    local list; list=$(local_repos)
+    [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
+    [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
+    start_run
+    printf '%s\n' "$list" | run_parallel stats
     finish_run
 }
 
@@ -334,6 +566,87 @@ action_check() {
     printf 'check\tcron\t%s\n'   "$cron_line"
     printf 'check\tlog\t%s\n'    "$LOG_FILE"
     printf 'check\tconfig\t%s\n' "$CONFIG_FILE"
+    printf 'check\thost\t%s\n'   "$HOST"
+    printf 'check\tfilter\t%s\n' "$CLONE_FILTER"
+    printf 'check\tmirror\t%s\n' "$MIRROR"
+    printf 'check\texclude\t%s\n' "$EXCLUDE"
+    printf 'check\tnotify\t%s\n' "$NOTIFY"
+    printf 'check\tfailed\t%s\n' "$(wc -l <"$STATE_DIR/failed.tsv" 2>/dev/null || echo 0)"
+    local timer_when=""
+    if command -v systemctl >/dev/null && [[ -f "$UNIT_DIR/ghsync.timer" ]] \
+       && systemctl --user is-enabled ghsync.timer >/dev/null 2>&1; then
+        timer_when=$(grep -oP '(?<=^OnCalendar=).*' "$UNIT_DIR/ghsync.timer" | head -1)
+    fi
+    printf 'check\ttimer\t%s\n' "$timer_when"
+}
+
+# ---------------------------------------------------------- systemd timer ----
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+timer_status() {
+    local when=""
+    if command -v systemctl >/dev/null && [[ -f "$UNIT_DIR/ghsync.timer" ]]; then
+        when=$(grep -oP '(?<=^OnCalendar=).*' "$UNIT_DIR/ghsync.timer" 2>/dev/null | head -1)
+        systemctl --user is-enabled ghsync.timer >/dev/null 2>&1 || when=""
+    fi
+    if [[ "$PORCELAIN" == true ]]; then
+        printf 'timer\t%s\t\n' "$when"
+        return 0
+    fi
+    if [[ -n "$when" ]]; then
+        printf '  %sTimer active:%s %s\n' "$C_GREEN" "$C_RESET" "$when"
+        systemctl --user list-timers --no-pager ghsync.timer 2>/dev/null | sed -n '2p'
+    else
+        printf '  %sNo systemd timer installed.%s\n' "$C_DIM" "$C_RESET"
+    fi
+}
+
+timer_install() {
+    local when="$1"
+    command -v systemctl >/dev/null || { err "systemctl not found — use the cron job instead"; return 1; }
+    mkdir -p "$UNIT_DIR"
+    cat >"$UNIT_DIR/ghsync.service" <<EOF
+[Unit]
+Description=Sync GitHub repositories
+Documentation=https://github.com/ghsync
+
+[Service]
+Type=oneshot
+ExecStart=$SELF sync --quiet
+EOF
+    cat >"$UNIT_DIR/ghsync.timer" <<EOF
+[Unit]
+Description=Sync GitHub repositories on a schedule
+
+[Timer]
+OnCalendar=$when
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl --user daemon-reload
+    if systemctl --user enable --now ghsync.timer >/dev/null 2>&1; then
+        printf '  %sTimer installed:%s %s\n' "$C_GREEN" "$C_RESET" "$when"
+        printf '  %sPersistent=true catches up a run missed while the machine was off.%s\n' "$C_DIM" "$C_RESET"
+        if command -v loginctl >/dev/null && [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]]; then
+            printf '  %sTo run while you are logged out: sudo loginctl enable-linger %s%s\n' \
+                "$C_DIM" "$USER" "$C_RESET"
+        fi
+    else
+        rm -f "$UNIT_DIR/ghsync.timer" "$UNIT_DIR/ghsync.service"
+        err "could not enable ghsync.timer (is a user session bus available?)"
+        return 1
+    fi
+}
+
+timer_remove() {
+    command -v systemctl >/dev/null || return 0
+    systemctl --user disable --now ghsync.timer >/dev/null 2>&1
+    rm -f "$UNIT_DIR/ghsync.timer" "$UNIT_DIR/ghsync.service"
+    systemctl --user daemon-reload 2>/dev/null
+    printf '  %sTimer removed.%s\n' "$C_GREEN" "$C_RESET"
 }
 
 # ------------------------------------------------------------------- cron ----
@@ -435,7 +748,12 @@ settings_menu() {
             "Include forks       : $INCLUDE_FORKS" \
             "Include archived    : $INCLUDE_ARCHIVED" \
             "Parallel jobs       : $JOBS" \
-            "Repo limit per owner: $LIMIT"
+            "Repo limit per owner: $LIMIT" \
+            "GitHub host         : ${HOST:-github.com}" \
+            "Clone filter        : $CLONE_FILTER" \
+            "Bare mirrors        : $MIRROR" \
+            "Exclude patterns    : ${EXCLUDE:-<none>}" \
+            "Notify on failure   : $NOTIFY"
         case "$MENU_CHOICE" in
             0) read -rep "  New root directory: " -i "$ROOT" val && ROOT="${val/#\~/$HOME}" ;;
             1) read -rep "  Owners (space separated, blank for your own): " -i "$OWNERS" val && OWNERS="$val" ;;
@@ -444,6 +762,12 @@ settings_menu() {
             4) [[ "$INCLUDE_ARCHIVED" == true ]] && INCLUDE_ARCHIVED=false || INCLUDE_ARCHIVED=true ;;
             5) read -rep "  Parallel jobs: " -i "$JOBS" val && [[ "$val" =~ ^[0-9]+$ ]] && JOBS="$val" ;;
             6) read -rep "  Repo limit per owner: " -i "$LIMIT" val && [[ "$val" =~ ^[0-9]+$ ]] && LIMIT="$val" ;;
+            7) read -rep "  GitHub host (blank for github.com): " -i "$HOST" val && HOST="$val" ;;
+            8) read -rep "  Clone filter (blob:none, tree:0, depth:N, none): " -i "$CLONE_FILTER" val \
+                   && CLONE_FILTER="$val" ;;
+            9) [[ "$MIRROR" == true ]] && MIRROR=false || MIRROR=true ;;
+            10) read -rep "  Exclude patterns: " -i "$EXCLUDE" val && EXCLUDE="$val" ;;
+            11) [[ "$NOTIFY" == true ]] && NOTIFY=false || NOTIFY=true ;;
             *) save_config; return ;;
         esac
         save_config
@@ -452,14 +776,18 @@ settings_menu() {
 
 cron_menu() {
     while true; do
-        menu "Scheduled updates (cron)" \
+        menu "Scheduled updates" \
             "Every hour                (0 * * * *)" \
             "Every 6 hours             (0 */6 * * *)" \
             "Every day at 03:00        (0 3 * * *)" \
             "Every Monday at 09:00     (0 9 * * 1)" \
             "Custom schedule…" \
             "Show current cron entry" \
-            "Remove the cron job"
+            "Remove the cron job" \
+            "systemd timer: every 6 hours" \
+            "systemd timer: every day at 03:00" \
+            "systemd timer: status" \
+            "systemd timer: remove"
         local sched=""
         [[ "$MENU_CHOICE" -ge 0 ]] && banner
         case "$MENU_CHOICE" in
@@ -471,6 +799,10 @@ cron_menu() {
                [[ -n "$sched" ]] && cron_install "$sched" ;;
             5) cron_status ;;
             6) cron_remove ;;
+            7) timer_install "*-*-* 00/6:00:00" ;;
+            8) timer_install "*-*-* 03:00:00" ;;
+            9) timer_status ;;
+            10) timer_remove ;;
             *) return ;;
         esac
         pause
@@ -484,7 +816,10 @@ tui() {
             "Pull updates into existing repositories" \
             "Full sync (clone missing + pull all)" \
             "Status overview" \
-            "Scheduled updates (cron)" \
+            "Repository statistics" \
+            "Retry failed operations" \
+            "Find orphaned clones" \
+            "Scheduled updates" \
             "Settings" \
             "View log" \
             "Quit"
@@ -493,9 +828,12 @@ tui() {
             1) banner; action_pull;   pause ;;
             2) banner; action_sync;   pause ;;
             3) banner; action_status; pause ;;
-            4) cron_menu ;;
-            5) settings_menu ;;
-            6) if [[ -f "$LOG_FILE" ]]; then ${PAGER:-less} +G "$LOG_FILE"; else banner; info "  No log yet."; pause; fi ;;
+            4) banner; action_stats;   pause ;;
+            5) banner; action_retry;   pause ;;
+            6) banner; action_orphans; pause ;;
+            7) cron_menu ;;
+            8) settings_menu ;;
+            9) if [[ -f "$LOG_FILE" ]]; then ${PAGER:-less} +G "$LOG_FILE"; else banner; info "  No log yet."; pause; fi ;;
             *) clear; return 0 ;;
         esac
     done
@@ -512,9 +850,14 @@ Usage:
   ghsync pull                     fetch + fast-forward every local repo
   ghsync sync                     clone missing, then pull everything
   ghsync status                   per-repo branch / dirty / ahead-behind
+  ghsync stats                    per-repo commits, branches, tags, size, last commit
+  ghsync retry                    re-run only the operations that failed last time
+  ghsync orphans                  local clones GitHub no longer returns
   ghsync cron install "0 */6 * * *"
   ghsync cron remove
   ghsync cron status
+  ghsync timer install "*-*-* 00/6:00:00"    systemd user timer instead of cron
+  ghsync timer remove | status
   ghsync config                   print the current configuration
   ghsync check                    machine-readable environment probe
 
@@ -524,6 +867,11 @@ Options:
   --jobs N        parallel git operations (default: $JOBS)
   --ssh|--https   clone protocol (default: $PROTOCOL)
   --forks         include forks
+  --host NAME     GitHub Enterprise host (sets GH_HOST)
+  --filter SPEC   partial clone: blob:none, tree:0, depth:N, or none
+  --mirror        clone bare mirrors instead of working trees
+  --exclude GLOB  skip repos matching a pattern; repeatable
+  --no-notify     do not send failures to the journal
   --archived      include archived repos
   -q, --quiet     no stdout, log only (used by the cron job)
   --porcelain     tab-separated output: TAG<TAB>NAME<TAB>DETAIL
@@ -541,6 +889,7 @@ if [[ "${1:-}" == "_worker" ]]; then
         clone)  IFS=$'\t' read -r _n _u <<<"$3"; do_clone "$_n" "$_u" ;;
         pull)   do_pull  "$3" ;;
         status) do_status "$3" ;;
+        stats)  do_stats  "$3" ;;
     esac
     exit $?
 fi
@@ -558,6 +907,12 @@ while (($#)); do
         --archived) INCLUDE_ARCHIVED=true; shift ;;
         -q|--quiet) QUIET=true; shift ;;
         --porcelain) PORCELAIN=true; shift ;;
+        --host)     HOST="$2"; export GH_HOST="$2"; shift 2 ;;
+        --filter)   CLONE_FILTER="$2"; shift 2 ;;
+        --no-filter) CLONE_FILTER="none"; shift ;;
+        --mirror)   MIRROR=true; shift ;;
+        --exclude)  EXCLUDE="${EXCLUDE:+$EXCLUDE }$2"; shift 2 ;;
+        --no-notify) NOTIFY=false; shift ;;
         -h|--help)  usage; exit 0 ;;
         -*)         err "unknown option: $1"; usage; exit 1 ;;
         *)          POS+=("$1"); shift ;;
@@ -568,7 +923,7 @@ done
 CMD="${POS[0]:-}"
 SUB="${POS[1]:-}"
 FILTER=""
-case "$CMD" in pull|update|status) FILTER="$SUB" ;; esac
+case "$CMD" in pull|update|status|stats) FILTER="$SUB" ;; esac
 SCHED="${POS[2]:-0 */6 * * *}"
 
 case "$CMD" in
@@ -577,6 +932,15 @@ case "$CMD" in
     pull|update)  action_pull ;;
     sync)         action_sync ;;
     status)       action_status ;;
+    stats)        action_stats ;;
+    retry)        action_retry ;;
+    orphans)      action_orphans ;;
+    timer)
+        case "$SUB" in
+            install) timer_install "${POS[2]:-*-*-* 00/6:00:00}" ;;
+            remove|uninstall) timer_remove ;;
+            *)       timer_status ;;
+        esac ;;
     check)        action_check ;;
     config)       [[ -f "$CONFIG_FILE" ]] || save_config; cat "$CONFIG_FILE" ;;
     cron)

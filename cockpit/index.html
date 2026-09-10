@@ -49,6 +49,7 @@
                     <button id="btn-clone" class="ghs-btn ghs-btn--primary" type="button">Clone missing</button>
                     <button id="btn-pull" class="ghs-btn ghs-btn--secondary" type="button">Pull updates</button>
                     <button id="btn-sync" class="ghs-btn ghs-btn--secondary" type="button">Full sync</button>
+                    <button id="btn-retry" class="ghs-btn ghs-btn--secondary ghs-hidden" type="button">Retry failed</button>
                     <button id="btn-refresh" class="ghs-btn ghs-btn--link" type="button">Refresh</button>
                     <button id="btn-cancel" class="ghs-btn ghs-btn--danger ghs-hidden" type="button">Cancel</button>
                 </div>
@@ -76,6 +77,10 @@
                         <dd class="ghs-dl__desc" id="v-attention">&mdash;</dd>
                     </div>
                     <div class="ghs-dl__group">
+                        <dt class="ghs-dl__term">Local-only work</dt>
+                        <dd class="ghs-dl__desc" id="v-unpushed">&mdash;</dd>
+                    </div>
+                    <div class="ghs-dl__group">
                         <dt class="ghs-dl__term">Schedule</dt>
                         <dd class="ghs-dl__desc" id="v-cron">&mdash;</dd>
                     </div>
@@ -86,6 +91,7 @@
         <article class="ghs-card">
             <div class="ghs-tabs" role="tablist">
                 <button class="ghs-tab ghs-tab--current" role="tab" data-tab="repos" aria-selected="true" type="button">Repositories</button>
+                <button class="ghs-tab" role="tab" data-tab="stats" aria-selected="false" type="button">Statistics</button>
                 <button class="ghs-tab" role="tab" data-tab="activity" aria-selected="false" type="button">Activity</button>
                 <button class="ghs-tab" role="tab" data-tab="settings" aria-selected="false" type="button">Settings</button>
                 <button class="ghs-tab" role="tab" data-tab="schedule" aria-selected="false" type="button">Schedule</button>
@@ -99,6 +105,7 @@
                                placeholder="Filter by name" aria-label="Filter repositories">
                     </div>
                     <span class="ghs-toolbar__spacer"></span>
+                    <button id="btn-orphans" class="ghs-btn ghs-btn--secondary ghs-btn--sm" type="button">Find orphans</button>
                     <span class="ghs-toolbar__count" id="repo-count"></span>
                 </div>
                 <div class="ghs-table-wrap">
@@ -111,6 +118,7 @@
                                 <th scope="col" class="ghs-num">Uncommitted</th>
                                 <th scope="col" class="ghs-num">Ahead</th>
                                 <th scope="col" class="ghs-num">Behind</th>
+                                <th scope="col" class="ghs-num">Local only</th>
                                 <th scope="col" class="ghs-table__action"><span class="ghs-sr">Actions</span></th>
                             </tr>
                         </thead>
@@ -122,6 +130,61 @@
                     <h3 class="ghs-empty__title">No repositories yet</h3>
                     <p class="ghs-empty__body" id="repos-empty-body">Nothing has been cloned into the repository root.</p>
                     <button class="ghs-btn ghs-btn--primary" type="button" id="btn-empty-clone">Clone missing</button>
+                </div>
+            </section>
+
+            <section class="ghs-tab-panel ghs-hidden" id="panel-stats" role="tabpanel">
+                <div class="ghs-metrics">
+                    <div class="ghs-metric">
+                        <span class="ghs-metric__label">Repositories</span>
+                        <span class="ghs-metric__value" id="m-repos">—</span>
+                    </div>
+                    <div class="ghs-metric">
+                        <span class="ghs-metric__label">Commits</span>
+                        <span class="ghs-metric__value" id="m-commits">—</span>
+                    </div>
+                    <div class="ghs-metric">
+                        <span class="ghs-metric__label">Branches</span>
+                        <span class="ghs-metric__value" id="m-branches">—</span>
+                    </div>
+                    <div class="ghs-metric">
+                        <span class="ghs-metric__label">On disk</span>
+                        <span class="ghs-metric__value" id="m-size">&mdash;</span>
+                    </div>
+                    <div class="ghs-metric">
+                        <span class="ghs-metric__label">Last commit</span>
+                        <span class="ghs-metric__value" id="m-last">—</span>
+                    </div>
+                </div>
+                <div class="ghs-toolbar">
+                    <div class="ghs-search">
+                        <svg class="ghs-search__icon" aria-hidden="true"><use href="#i-search"/></svg>
+                        <input id="stats-filter" class="ghs-input ghs-search__input" type="search"
+                               placeholder="Filter by name" aria-label="Filter statistics">
+                    </div>
+                    <span class="ghs-toolbar__spacer"></span>
+                    <button id="btn-stats" class="ghs-btn ghs-btn--secondary ghs-btn--sm" type="button">Recalculate</button>
+                </div>
+                <div class="ghs-table-wrap" id="stats-wrap">
+                    <table class="ghs-table">
+                        <thead>
+                            <tr>
+                                <th scope="col"><button class="ghs-sort" type="button" data-sort="name">Repository</button></th>
+                                <th scope="col" class="ghs-num"><button class="ghs-sort" type="button" data-sort="commits">Commits</button></th>
+                                <th scope="col" class="ghs-num"><button class="ghs-sort" type="button" data-sort="branches">Branches</button></th>
+                                <th scope="col" class="ghs-num"><button class="ghs-sort" type="button" data-sort="tags">Tags</button></th>
+                                <th scope="col" class="ghs-num"><button class="ghs-sort" type="button" data-sort="size">Size</button></th>
+                                <th scope="col"><button class="ghs-sort" type="button" data-sort="last">Last commit</button></th>
+                                <th scope="col">Author</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-body"></tbody>
+                    </table>
+                </div>
+                <div id="stats-empty" class="ghs-empty ghs-hidden">
+                    <svg class="ghs-empty__icon" aria-hidden="true"><use href="#i-repo"/></svg>
+                    <h3 class="ghs-empty__title">Nothing to measure</h3>
+                    <p class="ghs-empty__body" id="stats-empty-body">Clone some repositories first.</p>
                 </div>
             </section>
 
@@ -146,7 +209,26 @@
                         <input id="f-owners" class="ghs-input" type="text" placeholder="leave empty for your own repositories">
                         <p class="ghs-helper">Space separated. Empty means the repositories of the signed-in account.</p>
                     </div>
+                    <div class="ghs-form-group">
+                        <label class="ghs-label" for="f-host">GitHub host</label>
+                        <input id="f-host" class="ghs-input" type="text" placeholder="github.com">
+                        <p class="ghs-helper">Set this for GitHub Enterprise. It becomes <span class="ghs-mono">GH_HOST</span>.</p>
+                    </div>
+                    <div class="ghs-form-group">
+                        <label class="ghs-label" for="f-exclude">Exclude patterns</label>
+                        <input id="f-exclude" class="ghs-input ghs-mono" type="text" placeholder="acme/huge-*  */sandbox">
+                        <p class="ghs-helper">Space separated globs matched against <span class="ghs-mono">owner/repo</span>.</p>
+                    </div>
                     <div class="ghs-form-row">
+                        <div class="ghs-form-group">
+                            <label class="ghs-label" for="f-filter">First clone</label>
+                            <select id="f-filter" class="ghs-input">
+                                <option value="blob:none">Treeless (blob:none)</option>
+                                <option value="tree:0">Commits only (tree:0)</option>
+                                <option value="depth:1">Shallow (depth 1)</option>
+                                <option value="none">Full history</option>
+                            </select>
+                        </div>
                         <div class="ghs-form-group">
                             <label class="ghs-label" for="f-proto">Clone protocol</label>
                             <select id="f-proto" class="ghs-input">
@@ -176,6 +258,19 @@
                             <span class="ghs-switch__text">Archived repositories</span>
                         </label>
                     </div>
+                    <div class="ghs-form-group">
+                        <span class="ghs-label">Behaviour</span>
+                        <label class="ghs-switch">
+                            <input id="f-mirror" type="checkbox">
+                            <span class="ghs-switch__track"><span class="ghs-switch__thumb"></span></span>
+                            <span class="ghs-switch__text">Bare mirrors instead of working trees</span>
+                        </label>
+                        <label class="ghs-switch">
+                            <input id="f-notify" type="checkbox">
+                            <span class="ghs-switch__track"><span class="ghs-switch__thumb"></span></span>
+                            <span class="ghs-switch__text">Send failures to the journal</span>
+                        </label>
+                    </div>
                     <div class="ghs-form-actions">
                         <button id="btn-save" class="ghs-btn ghs-btn--primary" type="button">Save</button>
                         <button id="btn-reset" class="ghs-btn ghs-btn--link" type="button">Reset</button>
@@ -188,6 +283,17 @@
                     <div class="ghs-form-group">
                         <span class="ghs-label">Current schedule</span>
                         <p class="ghs-mono ghs-schedule-line" id="cron-line">No scheduled updates.</p>
+                    </div>
+                    <div class="ghs-form-group">
+                        <label class="ghs-label" for="f-backend">Scheduled by</label>
+                        <select id="f-backend" class="ghs-input ghs-input--narrow">
+                            <option value="cron">cron</option>
+                            <option value="timer">systemd user timer</option>
+                        </select>
+                        <p class="ghs-helper" id="backend-help">
+                            A systemd timer shows up in Cockpit's Services page and catches up a run
+                            missed while the machine was off.
+                        </p>
                     </div>
                     <div class="ghs-form-group">
                         <label class="ghs-label" for="f-sched">Run a full sync</label>

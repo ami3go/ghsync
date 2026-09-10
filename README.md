@@ -21,13 +21,21 @@ $ ghsync pull
 
 ## Features
 
-- Clones every repo returned by `gh repo list`, for your account or any org
+- Clones every repo returned by `gh repo list`, for your account or any org,
+  on github.com or GitHub Enterprise
 - Fast-forward-only updates: a dirty, detached, diverged or upstream-less repo is
   reported and left untouched — nothing is stashed, reset or overwritten
+- Warns about work that exists only on your machine: unpushed commits, branches
+  with no remote, and stashes
+- Finds orphans — clones GitHub no longer returns because they were renamed,
+  transferred or deleted
+- Treeless clones by default, so the first run over hundreds of repos is fast;
+  bare-mirror mode for backups
+- Retries only what failed, and reports failures to the journal
 - Parallel git operations with a `flock` so runs never overlap
 - Terminal TUI with arrow-key navigation, no `dialog`/`whiptail` dependency
-- Cockpit page in PatternFly style: overview, repository table, live activity
-  log, settings and scheduler, with light and dark theme support
+- Cockpit page in PatternFly style: overview, repository table, statistics,
+  live activity log, settings and scheduler, in light and dark themes
 - One command to install or remove the cron job
 
 ## Requirements
@@ -66,6 +74,9 @@ ghsync clone                 # clone every repo missing from the root directory
 ghsync pull                  # fetch + fast-forward every local clone
 ghsync sync                  # clone missing, then pull everything
 ghsync status                # branch / uncommitted / ahead / behind per repo
+ghsync stats                 # commits, branches, tags, size and last commit
+ghsync retry                 # re-run only what failed last time
+ghsync orphans               # clones GitHub no longer returns
 ghsync pull owner/repo       # act on a single repository
 ghsync cron install "0 */6 * * *"
 ghsync cron remove
@@ -74,7 +85,8 @@ ghsync check                 # machine-readable environment probe
 ```
 
 Flags: `--root DIR`, `--owner NAME` (repeatable, for organisations), `--jobs N`,
-`--ssh` / `--https`, `--forks`, `--archived`, `--limit N`, `--quiet`,
+`--ssh` / `--https`, `--forks`, `--archived`, `--limit N`, `--host NAME`,
+`--filter SPEC`, `--mirror`, `--exclude GLOB`, `--no-notify`, `--quiet`,
 `--porcelain`.
 
 ## Configuration
@@ -92,7 +104,21 @@ INCLUDE_ARCHIVED=false
 JOBS=4                   # parallel git operations
 LIMIT=1000               # max repos fetched per owner
 GIT_TIMEOUT=600          # seconds per git operation
+HOST=""                  # GitHub Enterprise host; empty = github.com
+CLONE_FILTER="blob:none" # blob:none | tree:0 | depth:N | none
+MIRROR=false             # bare mirrors instead of working trees
+EXCLUDE=""               # globs to skip, e.g. "acme/huge-* */sandbox"
+NOTIFY=true              # send failures to the journal
 ```
+
+### Partial clones
+
+The first clone of a large account is the slowest thing this tool does, so
+`CLONE_FILTER` defaults to `blob:none` — a treeless clone that fetches file
+contents on demand. Set it to `none` for full history, `tree:0` for commits
+only, or `depth:N` for a shallow clone. `MIRROR=true` clones bare mirrors into
+`root/owner/repo.git` instead, which captures every ref and skips working trees
+entirely — the right choice for a backup host.
 
 | Path | Contents |
 |---|---|
@@ -102,9 +128,17 @@ GIT_TIMEOUT=600          # seconds per git operation
 
 ## Scheduled updates
 
+Either a cron entry or a systemd user timer:
+
 ```bash
 ghsync cron install "0 */6 * * *"
+ghsync timer install "*-*-* 00/6:00:00"
 ```
+
+The timer is usually the better choice on a machine that sleeps: `Persistent=true`
+runs a missed sync at the next boot, which cron never does, and the unit shows up
+in Cockpit's Services page. It needs `sudo loginctl enable-linger $USER` to run
+while you are logged out.
 
 The entry runs `ghsync sync --quiet` as your user. Cron has no terminal, so the
 script sets `GIT_TERMINAL_PROMPT=0` and SSH batch mode to guarantee a run can
@@ -116,11 +150,23 @@ never hang waiting for input. Two consequences:
 - `gh` must read its token non-interactively. That is the default
   (`~/.config/gh/hosts.yml`); a locked keyring will break unattended runs.
 
+Failures are written to the log and, unless `NOTIFY=false`, sent to the journal
+under the `ghsync` tag — so an unattended failure surfaces in Cockpit's Logs
+page rather than only in a file nobody reads. Re-run just the failures with
+`ghsync retry`.
+
 ## Cockpit page
 
-Four tabs — Repositories, Activity, Settings, Schedule — under an overview card
+Five tabs — Repositories, Statistics, Activity, Settings, Schedule — under an overview card
 that shows gh status, the signed-in account, clone counts and the current
 schedule. Actions stream their output into the Activity tab line by line.
+
+Statistics lists every clone with its commit count (as a bar relative to the
+busiest repository), local branches, tags, the age of the last commit and its
+author, over totals for repositories, commits, branches and most recent
+activity. Every column sorts, commits older than 90 days are dimmed, and the
+figures are computed on first open and recalculated after any action that
+changes history.
 
 The page never runs as root. It calls `ghsync` through `cockpit.spawn` with
 `superuser: null`, so it uses the logged-in user's gh token and SSH keys, and it
