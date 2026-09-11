@@ -378,6 +378,33 @@
         return finishOperation(runCore(args), success, false);
     }
 
+    function findManagedOrphans() {
+        var button = $("btn-orphans");
+        if (button) button.disabled = true;
+        return Promise.all([runCore(["orphans"]), runThird(["list"])])
+            .then(function (outputs) {
+                var tracked = {};
+                outputs[1].split("\n").forEach(function (line) {
+                    var f = line.split("\t");
+                    if (f[0] === "third-party" && f[1]) tracked[f[1]] = true;
+                });
+                var orphans = [];
+                outputs[0].split("\n").forEach(function (line) {
+                    var f = line.split("\t");
+                    if (f[0] === "orphan" && f[1] && !tracked[f[1]]) orphans.push(f[1]);
+                });
+                if (!orphans.length) {
+                    window.alert("No orphaned clones. Tracked third-party repositories are treated as managed.");
+                } else {
+                    window.alert("Orphaned clones (nothing was removed):\n\n" + orphans.join("\n"));
+                }
+            })
+            .catch(function (ex) {
+                window.alert("Could not check orphaned clones: " + (ex.message || String(ex)));
+            })
+            .finally(function () { if (button) button.disabled = false; });
+    }
+
     function selectThirdParty() {
         document.querySelectorAll(".ghs-tab").forEach(function (item) {
             var on = item === tab;
@@ -392,6 +419,7 @@
         resize();
     }
 
+    if ($("btn-orphans")) $("btn-orphans").onclick = findManagedOrphans;
     tab.onclick = selectThirdParty;
     $("btn-third-refresh").onclick = refresh;
     $("btn-third-add").onclick = function () {
