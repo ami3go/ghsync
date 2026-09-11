@@ -50,7 +50,7 @@ fi
 
 install -Dm755 "$SRC/bin/ghsync" "$BIN"
 install -Dm755 "$SRC/bin/ghsync" "$PKG_DIR/ghsync"
-for f in manifest.json index.html ghsync.css ghsync.js; do
+for f in manifest.json index.html ghsync.css ghsync.js thirdparty.js; do
     install -Dm644 "$SRC/cockpit/$f" "$PKG_DIR/$f"
 done
 
