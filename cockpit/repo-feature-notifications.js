@@ -21,6 +21,17 @@
         var end = summaries[summaries.length - 1];
         var start = summaries.length > 1 ? summaries[summaries.length - 2] + 1 : 0;
         var run = lines.slice(start, end + 1).filter(Boolean);
+
+        /* finish_run writes per-repository local-only warnings immediately after
+           its summary. Include only those detailed owner/repo rows; do not absorb
+           events from a later run that may already have started in the log. */
+        for (var i = end + 1; i < lines.length; i += 1) {
+            var line = lines[i];
+            if (!line.trim()) continue;
+            if (/\s+local-only\s+\S+\/\S+/.test(line)) { run.push(line); continue; }
+            break;
+        }
+
         var important = run.filter(function (line) {
             return /\s+(updated|failed|diverged|local-only|dirty|no-upstream|detached)\s+/.test(line);
         });
@@ -51,7 +62,9 @@
 
     function showCockpitNotice(run) {
         var alerts = document.getElementById("alerts");
-        if (!alerts || document.getElementById("ghs-sync-notice")) return;
+        if (!alerts) return;
+        var old = document.getElementById("ghs-sync-notice");
+        if (old) old.remove();
         var danger = run.counts.failed > 0;
         var box = document.createElement("div");
         box.id = "ghs-sync-notice";
