@@ -12,27 +12,40 @@
         if (!dirty) return { disabled: true, title: "No uncommitted changes" };
         return {};
     }
-    function unique(lines) {
-        var seen = {}, out = [];
-        lines.forEach(function (line) { line = line.trim(); if (line && !seen[line]) { seen[line] = true; out.push(line); } });
+    function nulList(text) {
+        return (text || "").split("\0").filter(function (path) { return path !== ""; });
+    }
+    function unique(paths) {
+        var seen = Object.create(null), out = [];
+        paths.forEach(function (path) {
+            if (!Object.prototype.hasOwnProperty.call(seen, path)) {
+                seen[path] = true;
+                out.push(path);
+            }
+        });
         return out;
+    }
+    function displayPath(path) {
+        return JSON.stringify(path);
     }
     function commitSelected(name) {
         Promise.all([
-            m.runGit(name, ["diff", "--name-only", "HEAD"]),
-            m.runGit(name, ["ls-files", "--others", "--exclude-standard"])
+            m.runGit(name, ["diff", "--name-only", "--no-renames", "-z"]),
+            m.runGit(name, ["diff", "--cached", "--name-only", "--no-renames", "-z"]),
+            m.runGit(name, ["ls-files", "--others", "--exclude-standard", "-z"])
         ]).then(function (values) {
-            var files = unique(values[0].split("\n").concat(values[1].split("\n")));
+            var files = unique(nulList(values[0]).concat(nulList(values[1]), nulList(values[2])));
             if (!files.length) throw new Error("No changed files were found");
-            var display = files.map(function (path, i) { return (i + 1) + ". " + path; }).join("\n");
+            var display = files.map(function (path, i) { return (i + 1) + ". " + displayPath(path); }).join("\n");
             var choice = window.prompt("Changed files in " + name + ":\n\n" + display + "\n\nEnter ALL or comma-separated file numbers to commit:", "ALL");
             if (choice === null) throw { cancelled: true };
             choice = choice.trim();
             var selected;
             if (choice.toUpperCase() === "ALL") selected = files;
             else {
-                var indexes = choice.split(",").map(function (v) { return parseInt(v.trim(), 10); });
-                if (!indexes.length || indexes.some(function (n) { return !n || n < 1 || n > files.length; })) throw new Error("Invalid file selection");
+                var indexes = choice.split(",").map(function (v) { return Number(v.trim()); });
+                if (!indexes.length || indexes.some(function (n) { return !Number.isInteger(n) || n < 1 || n > files.length; }))
+                    throw new Error("Invalid file selection");
                 selected = unique(indexes.map(function (n) { return files[n - 1]; }));
             }
             var message = window.prompt("Commit message for " + selected.length + " selected file(s) in " + name + ":");
