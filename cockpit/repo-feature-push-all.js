@@ -12,23 +12,30 @@
     anchor.parentNode.insertBefore(button, anchor);
 
     button.onclick = function () {
-        var pending = [];
-        document.querySelectorAll("#repos tr").forEach(function (row) {
-            var cells = row.children, branch = cells[1] ? cells[1].textContent.trim() : "";
-            var ahead = cells[4] ? parseInt(cells[4].textContent, 10) || 0 : 0;
-            var name = cells[0] ? cells[0].textContent.trim() : "";
-            if (name && ahead > 0 && branch !== "mirror" && branch !== "detached") pending.push(name);
-        });
-        if (!pending.length) { window.alert("No current branches are ahead of their upstream."); return; }
-        if (!window.confirm("Push " + pending.length + " repositories?\n\n" + pending.join("\n"))) return;
-        button.disabled = true; button.textContent = "Pushing…";
-        var failures = [];
-        Promise.all(pending.map(function (name) {
-            return m.runGit(name, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-                .then(function () { return m.runGit(name, ["push"]); })
-                .catch(function (e) { failures.push(name + ": " + (e.message || String(e))); });
-        })).then(m.refreshMainPage).then(function () {
+        button.disabled = true; button.textContent = "Checking…";
+        var failures = [], pending = [];
+        m.statusSnapshot().then(function (repos) {
+            pending = repos.filter(function (repo) {
+                return repo.ahead > 0 && repo.branch !== "mirror" && repo.branch !== "detached";
+            });
+            if (!pending.length) throw { nothingToPush: true };
+            if (!window.confirm("Push " + pending.length + " repositories?\n\n" + pending.map(function (repo) { return repo.name; }).join("\n")))
+                throw { cancelled: true };
+            button.textContent = "Pushing…";
+            return m.mapLimit(pending, 4, function (repo) {
+                return m.runGit(repo.name, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+                    .then(function () { return m.runGit(repo.name, ["push"]); })
+                    .catch(function (e) { failures.push(repo.name + ": " + (e.message || String(e))); });
+            });
+        }).then(function () {
+            m.refreshMainPage();
             if (failures.length) window.alert("Some repositories were not pushed:\n\n" + failures.join("\n"));
-        }).finally(function () { button.disabled = false; button.textContent = "Push pending"; });
+        }).catch(function (e) {
+            if (e && e.cancelled) return;
+            if (e && e.nothingToPush) { window.alert("No current branches are ahead of their upstream."); return; }
+            window.alert("Bulk push failed: " + (e.message || String(e)));
+        }).finally(function () {
+            button.disabled = false; button.textContent = "Push pending";
+        });
     };
 })();

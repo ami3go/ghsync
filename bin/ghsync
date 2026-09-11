@@ -15,7 +15,7 @@
 #
 set -uo pipefail
 
-VERSION="1.0.0"
+VERSION="26.4"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 CRON_TAG="# ghsync"
 
@@ -24,6 +24,7 @@ export PATH="$PATH:/usr/local/bin:/usr/bin:/bin:/snap/bin:$HOME/.local/bin:/home
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ghsync"
 CONFIG_FILE="$CONFIG_DIR/config"
+THIRD_PARTY_FILE="$CONFIG_DIR/third-party.tsv"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ghsync"
 LOG_FILE="$STATE_DIR/ghsync.log"
 LOCK_FILE="$STATE_DIR/ghsync.lock"
@@ -149,7 +150,7 @@ acquire_lock() {
     return 0
 }
 
-# List repos as: <owner/repo>\t<clone-url>
+# List GitHub repos as: <owner/repo>\t<clone-url>
 list_repos() {
     local filter='.[]'
     [[ "$INCLUDE_FORKS"    == true ]] || filter+=' | select(.isFork | not)'
@@ -168,6 +169,29 @@ list_repos() {
             gh repo list "$owner" --limit "$LIMIT" --json "$fields" --jq "$filter"
         done | filter_excluded
     fi
+}
+
+# Third-party registry rows as: <owner/repo>\t<clone-url>.
+third_party_repos() {
+    [[ -f "$THIRD_PARTY_FILE" ]] || return 0
+    local name url
+    while IFS=$'\t' read -r name url _; do
+        [[ "$name" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || continue
+        [[ -n "$url" && "$url" != *' '* && "$url" != *$'\t'* ]] || continue
+        [[ ! "$url" =~ ^https?://[^/]*@ ]] || continue
+        [[ "$url" != *'?'* && "$url" != *'#'* ]] || continue
+        printf '%s\t%s\n' "$name" "$url"
+    done <"$THIRD_PARTY_FILE" | filter_excluded
+}
+
+# Every repository managed by ghsync. GitHub wins if a registry row reuses a name.
+managed_repos() {
+    local github
+    github=$(list_repos) || return 1
+    {
+        [[ -n "$github" ]] && printf '%s\n' "$github"
+        third_party_repos
+    } | awk -F '\t' '$1 != "" && !seen[$1]++'
 }
 
 # Local clones as: <owner/repo>. Covers working trees and bare mirrors.
@@ -413,10 +437,15 @@ do_stats() {
 
 # ------------------------------------------------------------ parallel runs ---
 start_run() {
+    local mode="${1:-write}"
     RESULT_FILE=$(mktemp "$STATE_DIR/run.XXXXXX")
     UNPUSHED_FILE=$(mktemp "$STATE_DIR/unpushed.XXXXXX")
-    FAILED_FILE="$STATE_DIR/failed.tsv"
-    : >"$FAILED_FILE"
+    if [[ "$mode" == "readonly" ]]; then
+        FAILED_FILE=""
+    else
+        FAILED_FILE="$STATE_DIR/failed.tsv"
+        : >"$FAILED_FILE"
+    fi
     export GHSYNC_RESULT="$RESULT_FILE" GHSYNC_UNPUSHED="$UNPUSHED_FILE" GHSYNC_FAILED="$FAILED_FILE"
     export GHSYNC_ROOT="$ROOT" GHSYNC_OWNERS="$OWNERS" GHSYNC_PROTOCOL="$PROTOCOL"
     export GHSYNC_JOBS="$JOBS" GHSYNC_QUIET="$QUIET" GHSYNC_PORCELAIN="$PORCELAIN"
@@ -489,19 +518,19 @@ action_clone() {
     preflight || return 1
     acquire_lock || return 1
     rotate_log
-    info "Listing repositories…"
-    local list; list=$(list_repos) || { err "could not list repositories"; return 1; }
-    [[ -z "$list" ]] && { err "no repositories returned by gh"; return 1; }
-    info "$(wc -l <<<"$list") repositories found. Cloning missing ones into $ROOT"
+    info "Listing managed repositories…"
+    local list; list=$(managed_repos) || { err "could not list managed repositories"; return 1; }
+    [[ -z "$list" ]] && { err "no managed repositories returned"; return 1; }
+    info "$(wc -l <<<"$list") managed repositories found. Cloning missing ones into $ROOT"
     start_run
     printf '%s\n' "$list" | run_parallel clone
     finish_run
     local orphans
-    orphans=$(comm -23 <(local_repos) <(printf '%s\n' "$list" | cut -f1 | sort) 2>/dev/null)
+    orphans=$(comm -23 <(local_repos) <(printf '%s\n' "$list" | cut -f1 | sort -u) 2>/dev/null)
     if [[ -n "$orphans" ]]; then
         local n
         while IFS= read -r n; do
-            [[ -n "$n" ]] && report "orphan" "$C_YELLOW" "$n" "not returned by GitHub any more"
+            [[ -n "$n" ]] && report "orphan" "$C_YELLOW" "$n" "not in the managed repository set"
         done <<<"$orphans"
     fi
 }
@@ -539,7 +568,7 @@ action_status() {
     local list; list=$(local_repos)
     [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
     [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
-    start_run
+    start_run readonly
     printf '%s\n' "$list" | run_parallel status
     finish_run
 }
@@ -559,11 +588,11 @@ action_retry() {
     finish_run
 }
 
-# Clones that are no longer returned by the GitHub API: renamed, transferred or deleted.
+# Local clones that are no longer in the GitHub or tracked third-party set.
 action_orphans() {
     preflight || return 1
     local remote local_list orphans
-    remote=$(list_repos | cut -f1 | sort) || { err "could not list repositories"; return 1; }
+    remote=$(managed_repos | cut -f1 | sort -u) || { err "could not list managed repositories"; return 1; }
     local_list=$(local_repos)
     [[ -z "$local_list" ]] && { info "No local clones."; return 0; }
     orphans=$(comm -23 <(printf '%s\n' "$local_list") <(printf '%s\n' "$remote"))
@@ -573,10 +602,10 @@ action_orphans() {
     fi
     local n
     while IFS= read -r n; do
-        [[ -n "$n" ]] && report "orphan" "$C_YELLOW" "$n" "not returned by GitHub any more"
+        [[ -n "$n" ]] && report "orphan" "$C_YELLOW" "$n" "not in the managed repository set"
     done <<<"$orphans"
     if [[ "$PORCELAIN" != true && "$QUIET" != true ]]; then
-        printf '\n  %sThese were renamed, transferred or deleted. Nothing was removed locally.%s\n' \
+        printf '\n  %sThese are not returned by GitHub and are not tracked as third-party repositories. Nothing was removed locally.%s\n' \
             "$C_DIM" "$C_RESET"
     fi
 }
@@ -585,7 +614,7 @@ action_stats() {
     local list; list=$(local_repos)
     [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
     [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
-    start_run
+    start_run readonly
     printf '%s\n' "$list" | run_parallel stats
     finish_run
 }
@@ -891,18 +920,18 @@ tui() {
 # ------------------------------------------------------------------- usage ---
 usage() {
     cat <<EOF
-ghsync $VERSION — clone and update all your GitHub repositories.
+ghsync $VERSION — clone and update all your managed repositories.
 
 Usage:
   ghsync                          launch the interactive TUI
-  ghsync clone                    clone every repo missing from \$ROOT
+  ghsync clone                    clone every managed repo missing from \$ROOT
   ghsync pull                     fetch + fast-forward every local repo
   ghsync commit OWNER/REPO "msg"  stage all changes and create a local commit
   ghsync sync                     clone missing, then pull everything
   ghsync status                   per-repo branch / dirty / ahead-behind
   ghsync stats                    per-repo commits, branches, tags, size, last commit
   ghsync retry                    re-run only the operations that failed last time
-  ghsync orphans                  local clones GitHub no longer returns
+  ghsync orphans                  local clones not in GitHub or the third-party registry
   ghsync cron install "0 */6 * * *"
   ghsync cron remove
   ghsync cron status

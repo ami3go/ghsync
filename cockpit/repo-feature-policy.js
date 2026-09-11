@@ -14,9 +14,9 @@
         m.loadMeta().then(function (meta) {
             document.querySelectorAll("#repos tr").forEach(function (row) {
                 var name = m.rowName ? m.rowName(row) : "";
-                var cell = row.querySelector(".ghs-repo-name");
-                if (!name || !cell) return;
-                var old = cell.querySelector(".ghs-update-policy");
+                var stateCell = row.children[2];
+                if (!name || !stateCell) return;
+                var old = row.querySelector(".ghs-update-policy");
                 if (old) old.remove();
                 var policy = policyFor(meta, name);
                 row.dataset.updatePolicy = policy;
@@ -24,7 +24,7 @@
                     var note = document.createElement("div");
                     note.className = "ghs-helper ghs-update-policy";
                     note.textContent = policy === "manual" ? "Manual updates" : "Ignored by automatic updates";
-                    cell.appendChild(note);
+                    stateCell.appendChild(note);
                 }
             });
         });
@@ -52,21 +52,15 @@
         });
     }
 
-    function automaticNames(meta) {
-        var names = [];
-        document.querySelectorAll("#repos tr").forEach(function (row) {
-            var name = m.rowName ? m.rowName(row) : "";
-            if (name && policyFor(meta, name) === "automatic") names.push(name);
-        });
-        return names;
-    }
-
     function runAutomatic(button) {
         if (running) return;
         running = true; button.disabled = true;
         var failures = [];
-        m.loadMeta().then(function (meta) {
-            var names = automaticNames(meta);
+        Promise.all([m.loadMeta(), m.statusSnapshot()]).then(function (values) {
+            var meta = values[0];
+            var names = values[1].map(function (repo) { return repo.name; }).filter(function (name) {
+                return policyFor(meta, name) === "automatic";
+            });
             if (!names.length) throw new Error("No repositories are set to Automatic");
             var chain = Promise.resolve();
             names.forEach(function (name) {

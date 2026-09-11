@@ -22,32 +22,44 @@
         match = value.match(/^[^@]+@([^:]+):/);
         return match ? match[1].toLowerCase() : "";
     }
+    function containsHttpSecret(url) {
+        url = (url || "").trim();
+        if (!/^https?:\/\//i.test(url)) return false;
+        try {
+            var parsed = new URL(url);
+            return !!(parsed.username || parsed.password || parsed.search || parsed.hash);
+        } catch (e) {
+            return /^(?:https?):\/\/[^/]*@/i.test(url) || /[?#]/.test(url);
+        }
+    }
 
     button.onclick = function () {
         button.disabled = true; button.textContent = "Scanning…";
-        Promise.all([m.runCore(["check"]), m.runThird(["list"])]).then(function (values) {
+        Promise.all([m.runCore(["check"]), m.runThird(["list"]), m.statusSnapshot()]).then(function (values) {
             var cfg = checks(values[0]), tracked = {}, managed = {}, githubHost = (cfg.host || "github.com").toLowerCase();
             values[1].split("\n").forEach(function (line) {
                 var f = line.split("\t"); if (f[0] === "third-party" && f[1]) tracked[f[1]] = true;
             });
             (cfg.owners || cfg.user || "").split(/\s+/).filter(Boolean).forEach(function (owner) { managed[owner.toLowerCase()] = true; });
-            var names = Array.prototype.map.call(document.querySelectorAll("#repos tr"), function (row) { return m.rowName ? m.rowName(row) : ""; }).filter(Boolean);
-            return Promise.all(names.filter(function (name) { return !tracked[name]; }).map(function (name) {
-                return m.runGit(name, ["remote", "get-url", "origin"]).then(function (url) {
-                    var owner = name.split("/")[0].toLowerCase(), host = remoteHost(url);
-                    return (!managed[owner] || (host && host !== githubHost)) ? { name: name, url: url.trim() } : null;
+            var repos = values[2].filter(function (repo) { return !tracked[repo.name]; });
+            return m.mapLimit(repos, 8, function (repo) {
+                return m.runGit(repo.name, ["remote", "get-url", "origin"]).then(function (url) {
+                    url = url.trim();
+                    if (containsHttpSecret(url)) return null;
+                    var owner = repo.name.split("/")[0].toLowerCase(), host = remoteHost(url);
+                    return (!managed[owner] || (host && host !== githubHost)) ? { name: repo.name, url: url } : null;
                 }).catch(function () { return null; });
-            }));
+            });
         }).then(function (items) {
             items = items.filter(Boolean);
-            if (!items.length) { window.alert("No untracked third-party clones were found."); return; }
+            if (!items.length) { window.alert("No untracked public third-party clones were found."); return; }
             var text = items.map(function (item) { return item.name + "  ←  " + item.url; }).join("\n");
             var choice = window.prompt("Discovered local repositories:\n\n" + text + "\n\nEnter owner/repository to track, or ALL to track every discovered repository:", items[0].name);
             if (choice === null) return;
             choice = choice.trim();
             var selected = choice.toUpperCase() === "ALL" ? items : items.filter(function (item) { return item.name === choice; });
             if (!selected.length) throw new Error("No discovered repository matched " + choice);
-            return Promise.all(selected.map(function (item) { return m.runThird(["add", item.url]); })).then(function () {
+            return m.mapLimit(selected, 2, function (item) { return m.runThird(["add", item.url]); }).then(function () {
                 document.getElementById("btn-third-refresh").click();
                 m.refreshMainPage();
             });

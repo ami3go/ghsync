@@ -10,12 +10,14 @@
                 var branch = out.trim();
                 if (!branch) throw new Error("Repository is not on a branch");
                 return manager.runGit(name, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-                    .then(function () { return manager.runGit(name, ["push"]); })
-                    .catch(function () {
-                        if (!window.confirm(branch + " has no upstream. Push it to origin and set origin/" + branch + " as upstream?"))
-                            throw { cancelled: true };
-                        return manager.runGit(name, ["push", "-u", "origin", branch]);
-                    });
+                    .then(
+                        function () { return manager.runGit(name, ["push"]); },
+                        function () {
+                            if (!window.confirm(branch + " has no upstream. Push it to origin and set origin/" + branch + " as upstream?"))
+                                throw { cancelled: true };
+                            return manager.runGit(name, ["push", "-u", "origin", branch]);
+                        }
+                    );
             })
             .then(function () {
                 window.alert("Pushed " + name + " successfully.");

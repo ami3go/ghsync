@@ -5,11 +5,17 @@
     if (!m || !m.loadMeta) return;
     var applying = false;
 
+    if (!document.getElementById("ghs-favorite-style")) {
+        var style = document.createElement("style");
+        style.id = "ghs-favorite-style";
+        style.textContent = ".ghs-repo-name--favorite::before{content:'★ ';}";
+        document.head.appendChild(style);
+    }
+
     function nameOf(row) {
         if (m.rowName) return m.rowName(row);
-        var cell = row.querySelector(".ghs-repo-name"); if (!cell) return "";
-        var clone = cell.cloneNode(true); clone.querySelectorAll(".ghs-repo-meta,.ghs-favorite-star").forEach(function (el) { el.remove(); });
-        return clone.textContent.trim();
+        var cell = row.querySelector(".ghs-repo-name");
+        return cell ? cell.textContent.trim() : "";
     }
     function apply() {
         if (applying) return;
@@ -19,16 +25,17 @@
             var rows = Array.prototype.slice.call(body.querySelectorAll("tr"));
             rows.forEach(function (row) {
                 var cell = row.querySelector(".ghs-repo-name"); if (!cell) return;
-                var name = nameOf(row), star = cell.querySelector(".ghs-favorite-star");
-                if (meta.favorites && meta.favorites[name]) {
-                    if (!star) { star = document.createElement("span"); star.className = "ghs-favorite-star"; star.textContent = "★ "; star.title = "Favourite"; cell.insertBefore(star, cell.firstChild); }
-                } else if (star) star.remove();
-                row.dataset.favorite = meta.favorites && meta.favorites[name] ? "1" : "0";
+                var name = nameOf(row), favorite = !!(meta.favorites && meta.favorites[name]);
+                cell.classList.toggle("ghs-repo-name--favorite", favorite);
+                cell.title = favorite ? "Favourite" : "";
+                row.dataset.favorite = favorite ? "1" : "0";
             });
-            rows.sort(function (a, b) {
+            var sorted = rows.slice().sort(function (a, b) {
                 var fav = (b.dataset.favorite || "0").localeCompare(a.dataset.favorite || "0");
                 return fav || nameOf(a).localeCompare(nameOf(b));
-            }).forEach(function (row) { body.appendChild(row); });
+            });
+            var changed = sorted.some(function (row, index) { return row !== rows[index]; });
+            if (changed) sorted.forEach(function (row) { body.appendChild(row); });
         }).finally(function () { applying = false; });
     }
 

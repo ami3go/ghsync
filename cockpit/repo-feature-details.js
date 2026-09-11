@@ -5,6 +5,20 @@
     if (!m) return;
 
     function safe(promise, fallback) { return promise.catch(function () { return fallback || ""; }); }
+    function displayRemote(value) {
+        value = (value || "").trim();
+        if (!/^https?:\/\//i.test(value)) return value;
+        try {
+            var url = new URL(value);
+            url.username = "";
+            url.password = "";
+            url.search = "";
+            url.hash = "";
+            return url.toString();
+        } catch (e) {
+            return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1").replace(/[?#].*$/, "");
+        }
+    }
     function show(title, fields) {
         var old = document.getElementById("ghs-repo-modal"); if (old) old.remove();
         var cover = document.createElement("div"), box = document.createElement("div"), close = document.createElement("button");
@@ -34,7 +48,7 @@
             ]).then(function (v) {
                 var log = (v[3] || "").trim().split("\t"), fetched = parseInt((v[5] || "").trim(), 10);
                 show(name, [
-                    ["Local path", dir, true], ["Origin", (v[0] || "").trim(), true], ["Branch", (v[1] || "").trim()],
+                    ["Local path", dir, true], ["Origin", displayRemote(v[0]), true], ["Branch", (v[1] || "").trim()],
                     ["Upstream", (v[2] || "").trim()], ["Latest commit", log.length > 1 ? log[0] + "  " + log[1] : ""],
                     ["Commit author", log[2] || ""], ["Commit time", log[3] ? new Date(parseInt(log[3], 10) * 1000).toLocaleString() : ""],
                     ["Last fetch", fetched ? new Date(fetched * 1000).toLocaleString() : "Never recorded"], ["On disk", (v[4] || "").trim().split(/\s+/)[0]]
