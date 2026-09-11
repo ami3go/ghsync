@@ -13,5 +13,6 @@
   "repo-feature-commit-selected.js",
   "repo-feature-history.js",
   "repo-feature-policy.js",
-  "repo-feature-notifications.js"
+  "repo-feature-notifications.js",
+  "repo-feature-backup.js"
 ]
