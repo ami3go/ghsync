@@ -44,7 +44,9 @@
                 return { label: b.textContent.trim(), run: function () { b.click(); }, state: { disabled: b.disabled, title: b.title } };
             });
         }
-        var nameCell = row.querySelector("td.ghs-repo-name"), name = nameCell ? nameCell.textContent.trim() : "";
+        var nameCell = row.querySelector("td.ghs-repo-name");
+        if (!row.dataset.repoName && nameCell) row.dataset.repoName = nameCell.textContent.trim();
+        var name = row.dataset.repoName || "";
         cell.textContent = ""; cell.dataset.managerReady = "yes";
         var wrap = document.createElement("div"), trigger = document.createElement("button"), menu = document.createElement("div");
         wrap.className = "ghs-menu-wrap";
@@ -115,6 +117,13 @@
             reposPanel.parentNode.insertBefore(thirdPanel, reposPanel.nextSibling);
         }
     }
+    function displayUrl(value) {
+        value = (value || "").trim();
+        if (!/^https?:\/\//i.test(value)) return value;
+        try {
+            var url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.toString();
+        } catch (e) { return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1").replace(/[?#].*$/, ""); }
+    }
     function thirdMessage(text, bad) { if ($("third-message")) { $("third-message").textContent = text || ""; $("third-message").className = "ghs-helper" + (bad ? " ghs-t-red" : ""); } resize(); }
     function renderThird() {
         var body = $("third-body"); if (!body) return; body.textContent = "";
@@ -122,7 +131,7 @@
         $("third-wrap").classList.toggle("ghs-hidden", !thirdRows.length); $("third-empty").classList.toggle("ghs-hidden", !!thirdRows.length);
         thirdRows.forEach(function (r) {
             var tr = document.createElement("tr"); tr.innerHTML = '<td class="ghs-repo-name"></td><td class="ghs-mono"></td><td></td><td class="ghs-table__action"></td>';
-            tr.children[0].textContent = r.name; tr.children[1].textContent = r.url; tr.children[2].textContent = r.state === "cloned" ? "Cloned" : "Missing";
+            tr.children[0].textContent = r.name; tr.children[1].textContent = displayUrl(r.url); tr.children[2].textContent = r.state === "cloned" ? "Cloned" : "Missing";
             var main = document.createElement("button"); main.className = "ghs-btn ghs-btn--secondary ghs-btn--sm"; main.textContent = r.state === "cloned" ? "Pull" : "Clone";
             main.onclick = function () { (r.state === "cloned" ? runCore(["pull", r.name]) : runThird(["add", r.url])).then(refreshThird).then(manager.refreshMainPage).catch(function (e) { thirdMessage(e.message || String(e), true); }); };
             var rm = document.createElement("button"); rm.className = "ghs-btn ghs-btn--secondary ghs-btn--danger-text ghs-btn--sm"; rm.style.marginLeft = ".375rem"; rm.textContent = "Untrack";
@@ -146,19 +155,10 @@
     if ($("btn-third-add")) $("btn-third-add").onclick = function () { var u = $("third-url").value.trim(); if (!u) return thirdMessage("Enter a public Git repository URL first.", true); runThird(["add", u]).then(function () { $("third-url").value = ""; }).then(refreshThird).then(manager.refreshMainPage).catch(function (e) { thirdMessage(e.message || String(e), true); }); };
     if ($("third-url")) $("third-url").onkeydown = function (e) { if (e.key === "Enter") $("btn-third-add").click(); };
 
-    if ($("btn-orphans")) $("btn-orphans").onclick = function () {
-        var b = $("btn-orphans"); b.disabled = true;
-        Promise.all([runCore(["orphans"]), runThird(["list"])]).then(function (o) {
-            var tracked = {}; o[1].split("\n").forEach(function (l) { var f = l.split("\t"); if (f[0] === "third-party") tracked[f[1]] = true; });
-            var list = []; o[0].split("\n").forEach(function (l) { var f = l.split("\t"); if (f[0] === "orphan" && !tracked[f[1]]) list.push(f[1]); });
-            window.alert(list.length ? "Orphaned clones (nothing removed):\n\n" + list.join("\n") : "No orphaned clones. Tracked third-party repositories are managed.");
-        }).catch(function (e) { window.alert("Could not check orphans: " + (e.message || String(e))); }).finally(function () { b.disabled = false; });
-    };
-
     if (thirdTab) new MutationObserver(function () { if (!thirdTab.classList.contains("ghs-tab--current")) thirdPanel.classList.add("ghs-hidden"); }).observe(thirdTab, { attributes: true });
 
     fetch("repo-features.json", { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("feature manifest"); return r.json(); }).then(function (files) {
-        var chain = Promise.resolve(); files.forEach(function (src) { chain = chain.then(function () { return new Promise(function (ok, bad) { var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.body.appendChild(s); }); }); }); return chain;
+        var chain = Promise.resolve(); files.forEach(function (src) { chain = chain.then(function () { return new Promise(function (ok, bad) { var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.body.appendChild(s); }); }); return chain;
     }).catch(function (e) { console.error("Repository feature loading failed", e); });
     resize();
 })();
