@@ -6,6 +6,14 @@
     var META = null, PATH = null;
 
     function defaultMeta() { return { groups: {}, tags: {}, favorites: {}, policies: {} }; }
+    function rowName(row) {
+        if (row.dataset.repoName) return row.dataset.repoName;
+        var cell = row.querySelector(".ghs-repo-name"); if (!cell) return "";
+        var clone = cell.cloneNode(true);
+        clone.querySelectorAll(".ghs-repo-meta,.ghs-favorite-star").forEach(function (el) { el.remove(); });
+        var name = clone.textContent.trim(); row.dataset.repoName = name; return name;
+    }
+    m.rowName = rowName;
     function metaPath() {
         if (PATH) return Promise.resolve(PATH);
         return m.runCore(["check"]).then(function (out) {
@@ -50,7 +58,7 @@
         if (!META) return;
         rebuildFilter(); var selected = (document.getElementById("repo-group-filter") || {}).value || "";
         document.querySelectorAll("#repos tr").forEach(function (row) {
-            var cell = row.querySelector(".ghs-repo-name"); if (!cell) return; var name = cell.childNodes[0] ? cell.childNodes[0].textContent.trim() : cell.textContent.trim();
+            var cell = row.querySelector(".ghs-repo-name"); if (!cell) return; var name = rowName(row);
             var old = cell.querySelector(".ghs-repo-meta"); if (old) old.remove();
             var group = (META.groups || {})[name] || "", tags = (META.tags || {})[name] || [];
             if (group || tags.length) { var meta = document.createElement("div"); meta.className = "ghs-helper ghs-repo-meta"; meta.textContent = [group, tags.join(", ")].filter(Boolean).join(" • "); cell.appendChild(meta); }

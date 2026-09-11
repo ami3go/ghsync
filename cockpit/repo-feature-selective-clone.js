@@ -19,9 +19,8 @@
         button.disabled = true;
         cockpit.spawn(["gh", "repo", "list", "--limit", "1000", "--json", "nameWithOwner", "--jq", ".[].nameWithOwner"], { err: "message" })
             .then(function (out) {
-                var available = out.trim().split("\n").filter(Boolean);
-                var local = {};
-                document.querySelectorAll("#repos .ghs-repo-name").forEach(function (el) { local[el.childNodes[0].textContent.trim()] = true; });
+                var available = out.trim().split("\n").filter(Boolean), local = {};
+                document.querySelectorAll("#repos tr").forEach(function (row) { var name = m.rowName ? m.rowName(row) : ""; if (name) local[name] = true; });
                 available = available.filter(function (name) { return !local[name]; });
                 if (!available.length) throw new Error("All repositories returned by GitHub are already cloned");
                 var preview = available.slice(0, 60).join("\n") + (available.length > 60 ? "\n… and " + (available.length - 60) + " more" : "");
@@ -36,8 +35,7 @@
                 var protocol = cfg.proto === "https" ? "url" : "sshUrl";
                 return cockpit.spawn(["gh", "repo", "view", name, "--json", protocol, "--jq", "." + protocol], { err: "message" })
                     .then(function (url) {
-                        var args = ["clone", "--recurse-submodules", "--quiet"];
-                        var filter = cfg.filter || "blob:none";
+                        var args = ["clone", "--recurse-submodules", "--quiet"], filter = cfg.filter || "blob:none";
                         if (filter === "blob:none" || filter === "tree:0") args.push("--filter=" + filter);
                         else if (/^depth:[0-9]+$/.test(filter)) args.push("--depth", filter.slice(6), "--no-single-branch");
                         return cockpit.spawn(["mkdir", "-p", dest.slice(0, dest.lastIndexOf("/"))], { err: "message" })

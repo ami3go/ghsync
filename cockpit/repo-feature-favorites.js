@@ -5,6 +5,12 @@
     if (!m || !m.loadMeta) return;
     var applying = false;
 
+    function nameOf(row) {
+        if (m.rowName) return m.rowName(row);
+        var cell = row.querySelector(".ghs-repo-name"); if (!cell) return "";
+        var clone = cell.cloneNode(true); clone.querySelectorAll(".ghs-repo-meta,.ghs-favorite-star").forEach(function (el) { el.remove(); });
+        return clone.textContent.trim();
+    }
     function apply() {
         if (applying) return;
         applying = true;
@@ -13,8 +19,7 @@
             var rows = Array.prototype.slice.call(body.querySelectorAll("tr"));
             rows.forEach(function (row) {
                 var cell = row.querySelector(".ghs-repo-name"); if (!cell) return;
-                var name = cell.childNodes[0] ? cell.childNodes[0].textContent.trim() : cell.textContent.trim();
-                var star = cell.querySelector(".ghs-favorite-star");
+                var name = nameOf(row), star = cell.querySelector(".ghs-favorite-star");
                 if (meta.favorites && meta.favorites[name]) {
                     if (!star) { star = document.createElement("span"); star.className = "ghs-favorite-star"; star.textContent = "★ "; star.title = "Favourite"; cell.insertBefore(star, cell.firstChild); }
                 } else if (star) star.remove();
@@ -22,8 +27,7 @@
             });
             rows.sort(function (a, b) {
                 var fav = (b.dataset.favorite || "0").localeCompare(a.dataset.favorite || "0");
-                if (fav) return fav;
-                return a.querySelector(".ghs-repo-name").textContent.localeCompare(b.querySelector(".ghs-repo-name").textContent);
+                return fav || nameOf(a).localeCompare(nameOf(b));
             }).forEach(function (row) { body.appendChild(row); });
         }).finally(function () { applying = false; });
     }
