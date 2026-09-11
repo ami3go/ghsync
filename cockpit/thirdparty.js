@@ -36,7 +36,7 @@
                         '<input id="third-url" class="ghs-input" type="text" placeholder="https://github.com/owner/repository.git" autocomplete="off">' +
                         '<button id="btn-third-add" class="ghs-btn ghs-btn--primary" type="button">Clone and track</button>' +
                     '</div>' +
-                    '<p class="ghs-helper">GitHub, GitLab, Codeberg and other Git URLs are supported. The final owner/repository pair determines the local path.</p>' +
+                    '<p class="ghs-helper">GitHub, GitLab, Codeberg and other public Git URLs are supported. The final owner/repository pair determines the local path.</p>' +
                 '</div>' +
             '</div>' +
             '<div class="ghs-toolbar">' +
@@ -59,7 +59,8 @@
         reposPanel.parentNode.insertBefore(panel, reposPanel.nextSibling);
     }
 
-    var SCRIPT = null;
+    var CORE = null;
+    var THIRD = null;
     var rows = [];
 
     function resize() {
@@ -82,20 +83,35 @@
         resize();
     }
 
-    function findScript() {
-        if (SCRIPT) return Promise.resolve(SCRIPT);
-        var probe =
+    function findScripts() {
+        if (CORE && THIRD) return Promise.resolve();
+        var coreProbe =
             'for p in "$HOME/.local/bin/ghsync" /usr/local/bin/ghsync /usr/bin/ghsync ' +
-            '"$HOME/.local/share/cockpit/ghsync/ghsync" "$HOME/.local/share/cockpit/ghsync/ghsync.sh" ' +
-            '/usr/share/cockpit/ghsync/ghsync /usr/share/cockpit/ghsync/ghsync.sh; do ' +
+            '"$HOME/.local/share/cockpit/ghsync/ghsync" /usr/share/cockpit/ghsync/ghsync; do ' +
             'if [ -f "$p" ]; then echo "$p"; exit 0; fi; done; exit 1';
-        return cockpit.spawn(["sh", "-c", probe], { err: "message" })
-            .then(function (out) { SCRIPT = out.trim(); return SCRIPT; });
+        var thirdProbe =
+            'for p in "$HOME/.local/bin/ghsync-thirdparty" /usr/local/bin/ghsync-thirdparty /usr/bin/ghsync-thirdparty ' +
+            '"$HOME/.local/share/cockpit/ghsync/ghsync-thirdparty" /usr/share/cockpit/ghsync/ghsync-thirdparty; do ' +
+            'if [ -f "$p" ]; then echo "$p"; exit 0; fi; done; exit 1';
+        return Promise.all([
+            cockpit.spawn(["sh", "-c", coreProbe], { err: "message" }),
+            cockpit.spawn(["sh", "-c", thirdProbe], { err: "message" })
+        ]).then(function (paths) {
+            CORE = paths[0].trim();
+            THIRD = paths[1].trim();
+        });
     }
 
-    function run(args) {
-        return findScript().then(function () {
-            return cockpit.spawn(["bash", SCRIPT].concat(args).concat(["--porcelain"]),
+    function runCore(args) {
+        return findScripts().then(function () {
+            return cockpit.spawn(["bash", CORE].concat(args).concat(["--porcelain"]),
+                                 { err: "message", superuser: null });
+        });
+    }
+
+    function runThird(args) {
+        return findScripts().then(function () {
+            return cockpit.spawn(["bash", THIRD].concat(args).concat(["--porcelain"]),
                                  { err: "message", superuser: null });
         });
     }
@@ -144,15 +160,15 @@
             actions.className = "ghs-table__action";
             var primary = actionButton(row.state === "cloned" ? "Pull" : "Clone",
                 "ghs-btn ghs-btn--secondary ghs-btn--sm", function () {
-                    if (row.state === "cloned") execute(["pull", row.name], "Updated " + row.name);
-                    else execute(["third-party", "add", row.url], "Cloned " + row.name);
+                    if (row.state === "cloned") executeCore(["pull", row.name], "Updated " + row.name);
+                    else executeThird(["add", row.url], "Cloned " + row.name);
                 });
             actions.appendChild(primary);
 
             var remove = actionButton("Untrack",
                 "ghs-btn ghs-btn--secondary ghs-btn--danger-text ghs-btn--sm", function () {
                     if (!window.confirm("Stop tracking " + row.name + "? The local clone will be kept.")) return;
-                    execute(["third-party", "remove", row.name], "Stopped tracking " + row.name);
+                    executeThird(["remove", row.name], "Stopped tracking " + row.name);
                 });
             remove.style.marginLeft = "0.375rem";
             actions.appendChild(remove);
@@ -165,7 +181,7 @@
     function refresh() {
         setBusy(true);
         setMessage("Loading tracked repositories…", false);
-        return run(["third-party", "list"])
+        return runThird(["list"])
             .then(function (out) {
                 rows = [];
                 out.split("\n").forEach(function (line) {
@@ -176,7 +192,7 @@
                 });
                 rows.sort(function (a, b) { return a.name.localeCompare(b.name); });
                 render();
-                setMessage(rows.length ? "Tracked repositories are included in normal Pull and Full sync runs." : "", false);
+                setMessage(rows.length ? "Tracked clones are updated by the normal Pull and Full sync actions." : "", false);
             })
             .catch(function (ex) {
                 rows = [];
@@ -191,13 +207,13 @@
         if (button && !button.disabled) button.click();
     }
 
-    function execute(args, success) {
+    function finishOperation(promise, success, clearUrl) {
         setBusy(true);
         setMessage("Working…", false);
-        return run(args)
+        return promise
             .then(function () {
                 setMessage(success, false);
-                if (args[0] === "third-party" && args[1] === "add") $("third-url").value = "";
+                if (clearUrl) $("third-url").value = "";
                 return refresh();
             })
             .then(refreshMainPage)
@@ -205,6 +221,14 @@
                 setMessage(ex.message || String(ex), true);
             })
             .finally(function () { setBusy(false); });
+    }
+
+    function executeThird(args, success) {
+        return finishOperation(runThird(args), success, args[0] === "add");
+    }
+
+    function executeCore(args, success) {
+        return finishOperation(runCore(args), success, false);
     }
 
     function selectThirdParty() {
@@ -229,15 +253,14 @@
             setMessage("Enter a public Git repository URL first.", true);
             return;
         }
-        execute(["third-party", "add", url], "Repository cloned and tracked.");
+        executeThird(["add", url], "Repository cloned and tracked.");
     };
     $("third-url").onkeydown = function (event) {
         if (event.key === "Enter") $("btn-third-add").click();
     };
 
-    /* ghsync.js controls the other tabs, including programmatic switches to
-       Activity. Watch their selected state so this extra panel never remains
-       visible beside another panel. */
+    /* ghsync.js owns the normal tabs and can switch to Activity from an action.
+       Hide this injected panel whenever another tab becomes current. */
     var observer = new MutationObserver(function () {
         if (!tab.classList.contains("ghs-tab--current")) panel.classList.add("ghs-hidden");
     });
