@@ -32,12 +32,12 @@ repo_name_from_url() {
     [[ -n "$url" ]] || return 1
     [[ "$url" != *$'\n'* && "$url" != *$'\r'* && "$url" != *$'\t'* && "$url" != *' '* ]] || return 1
 
-    # Never persist HTTP credentials/tokens embedded in a URL.
+    # Third-party tracking is for public repositories. Never persist credentials,
+    # tokens in query/fragment text, or other URL metadata that can leak secrets.
     [[ ! "$url" =~ ^https?://[^/]*@ ]] || return 1
+    [[ "$url" != *'?'* && "$url" != *'#'* ]] || return 1
 
-    clean="${url%%#*}"
-    clean="${clean%%\?*}"
-    clean="${clean%/}"
+    clean="${url%/}"
     clean="${clean%.git}"
 
     if [[ "$clean" == *"://"* ]]; then
@@ -134,12 +134,12 @@ list_repos() {
 add_repo() {
     local url="$1" name
     [[ -n "$url" ]] || fail "repository URL is required"
-    name=$(repo_name_from_url "$url") || fail "invalid repository URL; expected a public Git URL ending in owner/repository"
+    name=$(repo_name_from_url "$url") || fail "invalid public repository URL; credentials, query strings and fragments are not allowed"
 
     # Check reachability before saving the URL. Public repositories must not need
     # an interactive credential prompt.
     if ! GIT_TERMINAL_PROMPT=0 run_git ls-remote "$url" HEAD >/dev/null 2>&1; then
-        fail "repository is not reachable without credentials: $url"
+        fail "repository is not reachable without credentials"
     fi
 
     clone_repo "$name" "$url"
