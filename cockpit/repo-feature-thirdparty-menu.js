@@ -3,9 +3,13 @@
     "use strict";
     var body = document.getElementById("third-body");
     if (!body) return;
-    var open = null;
+    var openMenu = null, openTrigger = null;
 
-    function close() { if (open) open.classList.add("ghs-hidden"); open = null; }
+    function close() {
+        if (openMenu) openMenu.classList.add("ghs-hidden");
+        if (openTrigger) openTrigger.setAttribute("aria-expanded", "false");
+        openMenu = openTrigger = null;
+    }
     function compact(row) {
         var cell = row.querySelector("td.ghs-table__action");
         if (!cell || cell.dataset.thirdMenu === "yes") return;
@@ -28,12 +32,16 @@
         });
         trigger.onclick = function (event) {
             event.stopPropagation(); var opening = menu.classList.contains("ghs-hidden"); close();
-            if (opening) { menu.classList.remove("ghs-hidden"); open = menu; trigger.setAttribute("aria-expanded", "true"); }
+            if (opening) {
+                menu.classList.remove("ghs-hidden"); openMenu = menu; openTrigger = trigger;
+                trigger.setAttribute("aria-expanded", "true");
+            }
         };
         wrap.appendChild(trigger); wrap.appendChild(menu); cell.appendChild(wrap);
     }
     function apply() { body.querySelectorAll("tr").forEach(compact); }
     new MutationObserver(function () { setTimeout(apply, 0); }).observe(body, { childList: true });
     document.addEventListener("click", close);
+    document.addEventListener("keydown", function (event) { if (event.key === "Escape") close(); });
     apply();
 })();
