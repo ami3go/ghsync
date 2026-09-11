@@ -4,10 +4,23 @@
     var m = window.GHSyncRepoManager;
     if (!m) return;
 
+    function cleanHttpRemote(remote) {
+        try {
+            var url = new URL(remote);
+            url.username = "";
+            url.password = "";
+            url.search = "";
+            url.hash = "";
+            return url.toString().replace(/\/$/, "").replace(/\.git$/, "");
+        } catch (e) {
+            return "";
+        }
+    }
     function webUrl(remote) {
-        remote = (remote || "").trim().replace(/\.git$/, "");
+        remote = (remote || "").trim();
         var match;
-        if (/^https?:\/\//.test(remote)) return remote;
+        if (/^https?:\/\//i.test(remote)) return cleanHttpRemote(remote);
+        remote = remote.replace(/\.git$/, "");
         if ((match = remote.match(/^git@([^:]+):(.+)$/))) return "https://" + match[1] + "/" + match[2];
         if ((match = remote.match(/^ssh:\/\/(?:[^@]+@)?([^/]+)\/(.+)$/))) return "https://" + match[1] + "/" + match[2];
         if ((match = remote.match(/^git:\/\/([^/]+)\/(.+)$/))) return "https://" + match[1] + "/" + match[2];
