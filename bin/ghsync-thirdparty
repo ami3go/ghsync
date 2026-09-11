@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# Track public third-party Git repositories alongside ghsync-managed clones.
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ghsync"
+CONFIG_FILE="$CONFIG_DIR/config"
+REGISTRY="$CONFIG_DIR/third-party.tsv"
+ROOT="$HOME/github"
+CLONE_FILTER="blob:none"
+GIT_TIMEOUT=600
+PORCELAIN=false
+
+# ghsync owns this shell-format config file.
+# shellcheck source=/dev/null
+[[ -f "$CONFIG_FILE" ]] && . "$CONFIG_FILE"
+ROOT="${GHSYNC_ROOT:-$ROOT}"
+mkdir -p "$CONFIG_DIR"
+
+if command -v timeout >/dev/null 2>&1; then
+    run_git() { timeout "$GIT_TIMEOUT" git "$@"; }
+else
+    run_git() { git "$@"; }
+fi
+
+fail() {
+    printf '%s\n' "$*" >&2
+    exit 1
+}
+
+repo_name_from_url() {
+    local url="$1" clean path owner repo
+    [[ -n "$url" ]] || return 1
+    [[ "$url" != *$'\n'* && "$url" != *$'\r'* && "$url" != *$'\t'* && "$url" != *' '* ]] || return 1
+
+    # Never persist HTTP credentials/tokens embedded in a URL.
+    [[ ! "$url" =~ ^https?://[^/]*@ ]] || return 1
+
+    clean="${url%%#*}"
+    clean="${clean%%\?*}"
+    clean="${clean%/}"
+    clean="${clean%.git}"
+
+    if [[ "$clean" == *"://"* ]]; then
+        path="${clean#*://}"
+        path="${path#*/}"
+    elif [[ "$clean" =~ ^[^/]+@[^:]+:(.+)$ ]]; then
+        path="${BASH_REMATCH[1]}"
+    else
+        path="$clean"
+    fi
+    path="${path#/}"
+    repo="${path##*/}"
+    path="${path%/*}"
+    owner="${path##*/}"
+
+    [[ -n "$owner" && -n "$repo" ]] || return 1
+    [[ "$owner" != "." && "$owner" != ".." && "$repo" != "." && "$repo" != ".." ]] || return 1
+    [[ "$owner" =~ ^[A-Za-z0-9._-]+$ && "$repo" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+    printf '%s/%s\n' "$owner" "$repo"
+}
+
+registered_rows() {
+    [[ -f "$REGISTRY" ]] || return 0
+    awk -F '\t' 'NF >= 2 && $1 != "" && $2 != "" { print $1 "\t" $2 }' "$REGISTRY"
+}
+
+store_row() {
+    local name="$1" url="$2" tmp
+    tmp=$(mktemp "$CONFIG_DIR/third-party.XXXXXX")
+    if [[ -f "$REGISTRY" ]]; then
+        awk -F '\t' -v n="$name" '$1 != n' "$REGISTRY" >"$tmp"
+    fi
+    printf '%s\t%s\n' "$name" "$url" >>"$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$REGISTRY"
+}
+
+remove_row() {
+    local name="$1" tmp
+    [[ -f "$REGISTRY" ]] || return 1
+    grep -Fq "$name"$'\t' "$REGISTRY" || return 1
+    tmp=$(mktemp "$CONFIG_DIR/third-party.XXXXXX")
+    awk -F '\t' -v n="$name" '$1 != n' "$REGISTRY" >"$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$REGISTRY"
+}
+
+repo_path() {
+    local name="$1"
+    if [[ -e "$ROOT/$name/.git" ]]; then printf '%s\n' "$ROOT/$name"
+    elif [[ -d "$ROOT/$name.git" ]]; then printf '%s\n' "$ROOT/$name.git"
+    fi
+}
+
+clone_repo() {
+    local name="$1" url="$2" dest="$ROOT/$name" origin out
+    local -a args=(--recurse-submodules --quiet)
+    case "$CLONE_FILTER" in
+        blob:none|tree:0) args+=(--filter="$CLONE_FILTER") ;;
+        depth:*)          args+=(--depth "${CLONE_FILTER#depth:}" --no-single-branch) ;;
+        *)                : ;;
+    esac
+
+    if [[ -n "$(repo_path "$name")" ]]; then
+        origin=$(git -C "$ROOT/$name" remote get-url origin 2>/dev/null || true)
+        if [[ -n "$origin" && "$origin" != "$url" ]]; then
+            fail "$name already exists with a different origin: $origin"
+        fi
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+    if ! out=$(run_git clone "${args[@]}" "$url" "$dest" 2>&1); then
+        fail "clone failed: ${out##*$'\n'}"
+    fi
+}
+
+list_repos() {
+    local name url state
+    while IFS=$'\t' read -r name url; do
+        [[ -n "$name" ]] || continue
+        state="missing"
+        [[ -n "$(repo_path "$name")" ]] && state="cloned"
+        if [[ "$PORCELAIN" == true ]]; then
+            printf 'third-party\t%s\t%s\t%s\n' "$name" "$url" "$state"
+        else
+            printf '%-36s %-8s %s\n' "$name" "$state" "$url"
+        fi
+    done < <(registered_rows)
+}
+
+add_repo() {
+    local url="$1" name
+    [[ -n "$url" ]] || fail "repository URL is required"
+    name=$(repo_name_from_url "$url") || fail "invalid repository URL; expected a public Git URL ending in owner/repository"
+
+    # Check reachability before saving the URL. Public repositories must not need
+    # an interactive credential prompt.
+    if ! GIT_TERMINAL_PROMPT=0 run_git ls-remote "$url" HEAD >/dev/null 2>&1; then
+        fail "repository is not reachable without credentials: $url"
+    fi
+
+    clone_repo "$name" "$url"
+    store_row "$name" "$url"
+    if [[ "$PORCELAIN" == true ]]; then
+        printf 'tracked\t%s\t%s\n' "$name" "$url"
+    else
+        printf 'Tracked %s at %s\n' "$name" "$ROOT/$name"
+    fi
+}
+
+remove_repo() {
+    local name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || fail "owner/repository is required"
+    remove_row "$name" || fail "$name is not tracked"
+    if [[ "$PORCELAIN" == true ]]; then
+        printf 'untracked\t%s\tlocal clone kept\n' "$name"
+    else
+        printf 'Stopped tracking %s; local clone was kept.\n' "$name"
+    fi
+}
+
+usage() {
+    cat <<EOF
+Usage:
+  ghsync-thirdparty list
+  ghsync-thirdparty add URL
+  ghsync-thirdparty remove OWNER/REPOSITORY
+
+Tracked repositories are stored in: $REGISTRY
+Clones are stored in:               $ROOT/owner/repository
+EOF
+}
+
+args=()
+while (($#)); do
+    case "$1" in
+        --porcelain) PORCELAIN=true; shift ;;
+        --root) ROOT="${2/#\~/$HOME}"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+
+cmd="${args[0]:-list}"
+case "$cmd" in
+    list) list_repos ;;
+    add) add_repo "${args[1]:-}" ;;
+    remove|untrack) remove_repo "${args[1]:-}" ;;
+    *) fail "unknown command: $cmd" ;;
+esac
