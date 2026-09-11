@@ -157,8 +157,23 @@
 
     if (thirdTab) new MutationObserver(function () { if (!thirdTab.classList.contains("ghs-tab--current")) thirdPanel.classList.add("ghs-hidden"); }).observe(thirdTab, { attributes: true });
 
-    fetch("repo-features.json", { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("feature manifest"); return r.json(); }).then(function (files) {
-        var chain = Promise.resolve(); files.forEach(function (src) { chain = chain.then(function () { return new Promise(function (ok, bad) { var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.body.appendChild(s); }); }); return chain;
+    fetch("repo-features.json", { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error("feature manifest");
+        return r.json();
+    }).then(function (files) {
+        var chain = Promise.resolve();
+        files.forEach(function (src) {
+            chain = chain.then(function () {
+                return new Promise(function (ok, bad) {
+                    var s = document.createElement("script");
+                    s.src = src;
+                    s.onload = ok;
+                    s.onerror = bad;
+                    document.body.appendChild(s);
+                });
+            });
+        });
+        return chain;
     }).catch(function (e) { console.error("Repository feature loading failed", e); });
     resize();
 })();
