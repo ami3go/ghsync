@@ -17,13 +17,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: shellcheck
-        run: shellcheck bin/ghsync install.sh
+        run: shellcheck bin/ghsync bin/ghsync-thirdparty install.sh
 
       - name: bash syntax
-        run: bash -n bin/ghsync && bash -n install.sh
+        run: bash -n bin/ghsync && bash -n bin/ghsync-thirdparty && bash -n install.sh
 
       - name: JavaScript syntax
-        run: node --check cockpit/ghsync.js
+        run: |
+          node --check cockpit/ghsync.js
+          node --check cockpit/thirdparty.js
 
       - name: Cockpit manifest is valid JSON
         run: python3 -m json.tool cockpit/manifest.json > /dev/null
@@ -45,14 +47,18 @@ jobs:
       - name: Command and Cockpit page are in place
         run: |
           test -x "$HOME/.local/bin/ghsync"
+          test -x "$HOME/.local/bin/ghsync-thirdparty"
           test -f "$HOME/.local/share/cockpit/ghsync/manifest.json"
           test -x "$HOME/.local/share/cockpit/ghsync/ghsync"
+          test -x "$HOME/.local/share/cockpit/ghsync/ghsync-thirdparty"
+          test -f "$HOME/.local/share/cockpit/ghsync/thirdparty.js"
 
       - name: Script runs without gh configured
         run: |
           "$HOME/.local/bin/ghsync" --help
           "$HOME/.local/bin/ghsync" config
           "$HOME/.local/bin/ghsync" check
+          "$HOME/.local/bin/ghsync-thirdparty" --help
 
       - name: Clone, pull, commit and status against a local fixture
         run: |
@@ -76,7 +82,42 @@ jobs:
           test "$(git -C /tmp/fixture/acme/demo log -1 --format=%s)" = "local change"
           test "$(git -C /tmp/fixture/acme/demo rev-parse HEAD)" != "$(git --git-dir=/tmp/remote.git rev-parse main)"
 
+      - name: Track and update a third-party repository
+        run: |
+          set -e
+          export XDG_CONFIG_HOME=/tmp/ghsync-config
+          export GHSYNC_ROOT=/tmp/fixture
+          mkdir -p /tmp/public/vendor
+          git init -q --bare /tmp/public/vendor/widget.git
+          git clone -q /tmp/public/vendor/widget.git /tmp/vendor-work
+          cd /tmp/vendor-work
+          echo first > vendor.txt
+          git add vendor.txt
+          git commit -qm first
+          git push -q origin main
+
+          "$HOME/.local/bin/ghsync-thirdparty" add file:///tmp/public/vendor/widget.git --porcelain | tee /tmp/third-add
+          grep -q $'^tracked\tvendor/widget\t' /tmp/third-add
+          test -d /tmp/fixture/vendor/widget/.git
+
+          "$HOME/.local/bin/ghsync-thirdparty" list --porcelain | tee /tmp/third-list
+          grep -q $'^third-party\tvendor/widget\t.*\tcloned$' /tmp/third-list
+
+          cd /tmp/vendor-work
+          echo second >> vendor.txt
+          git commit -qam second
+          git push -q origin main
+          "$HOME/.local/bin/ghsync" pull vendor/widget --porcelain | tee /tmp/third-pull
+          grep -q '^updated' /tmp/third-pull
+          test "$(git -C /tmp/fixture/vendor/widget log -1 --format=%s)" = second
+
+          "$HOME/.local/bin/ghsync-thirdparty" remove vendor/widget --porcelain | tee /tmp/third-remove
+          grep -q $'^untracked\tvendor/widget\t' /tmp/third-remove
+          test -d /tmp/fixture/vendor/widget/.git
+          test -z "$("$HOME/.local/bin/ghsync-thirdparty" list --porcelain)"
+
       - name: Uninstall cleanly
         run: |
           bash ./install.sh --uninstall
           test ! -e "$HOME/.local/bin/ghsync"
+          test ! -e "$HOME/.local/bin/ghsync-thirdparty"

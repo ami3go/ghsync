@@ -25,6 +25,7 @@ DESTDIR="${DESTDIR:-}"
 if [[ "$SYSTEM" == true ]]; then
     PREFIX="${PREFIX:-/usr/local}"
     BIN="$DESTDIR$PREFIX/bin/ghsync"
+    THIRD_BIN="$DESTDIR$PREFIX/bin/ghsync-thirdparty"
     PKG_DIR="$DESTDIR/usr/share/cockpit/ghsync"
     if [[ $EUID -ne 0 && -z "$DESTDIR" ]]; then
         echo "--system needs root. Re-run with sudo." >&2
@@ -32,14 +33,16 @@ if [[ "$SYSTEM" == true ]]; then
     fi
 else
     BIN="$HOME/.local/bin/ghsync"
+    THIRD_BIN="$HOME/.local/bin/ghsync-thirdparty"
     PKG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cockpit/ghsync"
 fi
 
 if [[ "$UNINSTALL" == true ]]; then
     rm -rf "$PKG_DIR"
-    rm -f "$BIN"
+    rm -f "$BIN" "$THIRD_BIN"
     echo "Removed $PKG_DIR"
     echo "Removed $BIN"
+    echo "Removed $THIRD_BIN"
     echo
     echo "Your repositories, config and log were left alone."
     echo "To drop the scheduled job as well, run 'ghsync cron remove' before uninstalling."
@@ -47,15 +50,19 @@ if [[ "$UNINSTALL" == true ]]; then
 fi
 
 [[ -f "$SRC/bin/ghsync" ]] || { echo "bin/ghsync missing — run this from the repository root." >&2; exit 1; }
+[[ -f "$SRC/bin/ghsync-thirdparty" ]] || { echo "bin/ghsync-thirdparty missing — run this from the repository root." >&2; exit 1; }
 
 install -Dm755 "$SRC/bin/ghsync" "$BIN"
+install -Dm755 "$SRC/bin/ghsync-thirdparty" "$THIRD_BIN"
 install -Dm755 "$SRC/bin/ghsync" "$PKG_DIR/ghsync"
-for f in manifest.json index.html ghsync.css ghsync.js; do
+install -Dm755 "$SRC/bin/ghsync-thirdparty" "$PKG_DIR/ghsync-thirdparty"
+for f in manifest.json index.html ghsync.css ghsync.js thirdparty.js; do
     install -Dm644 "$SRC/cockpit/$f" "$PKG_DIR/$f"
 done
 
 echo "Installed:"
 echo "  command      $BIN"
+echo "  helper       $THIRD_BIN"
 echo "  cockpit page $PKG_DIR"
 echo
 
