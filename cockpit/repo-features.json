@@ -4,5 +4,6 @@
   "repo-feature-open.js",
   "repo-feature-branches.js",
   "repo-feature-check-updates.js",
-  "repo-feature-push-all.js"
+  "repo-feature-push-all.js",
+  "repo-feature-groups.js"
 ]
