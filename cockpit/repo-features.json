@@ -7,5 +7,6 @@
   "repo-feature-push-all.js",
   "repo-feature-groups.js",
   "repo-feature-favorites.js",
-  "repo-feature-selective-clone.js"
+  "repo-feature-selective-clone.js",
+  "repo-feature-discover-thirdparty.js"
 ]
