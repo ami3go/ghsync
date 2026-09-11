@@ -17,13 +17,13 @@
         if (!/^https?:\/\//i.test(value)) return value;
         try {
             var url = new URL(value);
-            if (url.username || url.password) {
-                url.username = "";
-                url.password = "";
-            }
+            url.username = "";
+            url.password = "";
+            url.search = "";
+            url.hash = "";
             return url.toString();
         } catch (e) {
-            return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1");
+            return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1").replace(/[?#].*$/, "");
         }
     }
 
