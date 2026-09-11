@@ -61,7 +61,13 @@ repo_name_from_url() {
 
 registered_rows() {
     [[ -f "$REGISTRY" ]] || return 0
-    awk -F '\t' 'NF >= 2 && $1 != "" && $2 != "" { print $1 "\t" $2 }' "$REGISTRY"
+    local name url derived
+    while IFS=$'\t' read -r name url _; do
+        [[ -n "$name" && -n "$url" ]] || continue
+        derived=$(repo_name_from_url "$url") || continue
+        [[ "$derived" == "$name" ]] || continue
+        printf '%s\t%s\n' "$name" "$url"
+    done <"$REGISTRY"
 }
 
 store_row() {
