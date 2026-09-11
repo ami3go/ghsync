@@ -45,6 +45,8 @@ jobs:
           assert names, 'feature manifest is empty'
           assert len(names) == len(set(names)), 'duplicate feature entries'
           assert names[0] == 'repo-feature-release.js', 'release marker must load first'
+          assert 'repo-feature-core-helpers.js' in names, 'shared bulk-action helpers must be loaded'
+          assert names.index('repo-feature-core-helpers.js') < names.index('repo-feature-check-updates.js')
           assert names[-1] == 'repo-feature-thirdparty-menu.js', 'third-party compaction must load last'
           missing = [name for name in names if not (root / name).is_file()]
           assert not missing, f'missing feature files: {missing}'
@@ -54,13 +56,21 @@ jobs:
 
       - name: Repository manager safety checks
         run: |
-          grep -q 'var version = "26.3"' cockpit/repo-feature-release.js
+          grep -q 'VERSION="26.4"' bin/ghsync
+          grep -q 'var version = "26.4"' cockpit/repo-feature-release.js
+          grep -q '<title>GitHub Sync 26.4</title>' cockpit/index.html
+          grep -q '>GitHub Sync 26.4</h1>' cockpit/index.html
           ! grep -Eq -- '--force|--force-with-lease' cockpit/repo-feature-push.js
           ! grep -Eq -- 'branch.*-D' cockpit/repo-feature-branches.js
+          grep -q 'check-ref-format' cockpit/repo-feature-branches.js
           grep -q 'DISCARD ' cockpit/repo-feature-local-changes.js
           grep -q 'bundle create' cockpit/repo-feature-backup.js
+          grep -q 'git apply --index' cockpit/repo-feature-backup.js
+          grep -q 'diff.*--cached.*--name-only.*--no-renames.*-z' cockpit/repo-feature-commit-selected.js
           grep -q 'fsck' cockpit/repo-feature-maintenance.js
           grep -q 'automatic' cockpit/repo-feature-policy.js
+          grep -q 'third_party_repos' bin/ghsync
+          grep -q 'managed_repos' bin/ghsync
 
       - name: Cockpit page DOM test
         run: |
@@ -97,7 +107,7 @@ jobs:
 
       - name: Script runs without gh configured
         run: |
-          "$HOME/.local/bin/ghsync" --help
+          "$HOME/.local/bin/ghsync" --help | grep -q 'ghsync 26.4'
           "$HOME/.local/bin/ghsync" config
           "$HOME/.local/bin/ghsync" check
           "$HOME/.local/bin/ghsync-thirdparty" --help
@@ -124,7 +134,7 @@ jobs:
           test "$(git -C /tmp/fixture/acme/demo log -1 --format=%s)" = "local change"
           test "$(git -C /tmp/fixture/acme/demo rev-parse HEAD)" != "$(git --git-dir=/tmp/remote.git rev-parse main)"
 
-      - name: Track and update a third-party repository
+      - name: Track and manage a third-party repository
         run: |
           set -e
           export XDG_CONFIG_HOME=/tmp/ghsync-config
@@ -145,6 +155,12 @@ jobs:
           "$HOME/.local/bin/ghsync-thirdparty" list --porcelain | tee /tmp/third-list
           grep -q $'^third-party\tvendor/widget\t.*\tcloned$' /tmp/third-list
 
+          # Credential/query-bearing public URLs must be rejected before network access.
+          ! "$HOME/.local/bin/ghsync-thirdparty" add 'https://user:token@example.invalid/vendor/secret.git' >/tmp/secret-userinfo 2>&1
+          ! grep -q 'token' /tmp/secret-userinfo
+          ! "$HOME/.local/bin/ghsync-thirdparty" add 'https://example.invalid/vendor/secret.git?token=secret' >/tmp/secret-query 2>&1
+          ! grep -q 'token=secret' /tmp/secret-query
+
           cd /tmp/vendor-work
           echo second >> vendor.txt
           git commit -qam second
@@ -152,6 +168,25 @@ jobs:
           "$HOME/.local/bin/ghsync" pull vendor/widget --porcelain | tee /tmp/third-pull
           grep -q '^updated' /tmp/third-pull
           test "$(git -C /tmp/fixture/vendor/widget log -1 --format=%s)" = second
+
+          # Core clone/orphan handling must include the third-party registry.
+          mkdir -p /tmp/fakebin
+          cat >/tmp/fakebin/gh <<'EOF'
+          #!/usr/bin/env bash
+          if [[ "${1:-} ${2:-}" == "auth status" ]]; then exit 0; fi
+          if [[ "${1:-} ${2:-}" == "repo list" ]]; then exit 0; fi
+          if [[ "${1:-} ${2:-}" == "api user" ]]; then printf 'ci\n'; exit 0; fi
+          exit 1
+          EOF
+          chmod +x /tmp/fakebin/gh
+
+          PATH="/tmp/fakebin:$PATH" "$HOME/.local/bin/ghsync" orphans --porcelain | tee /tmp/orphans
+          ! grep -q $'^orphan\tvendor/widget\t' /tmp/orphans
+
+          rm -rf /tmp/fixture/vendor/widget
+          PATH="/tmp/fakebin:$PATH" "$HOME/.local/bin/ghsync" clone --porcelain | tee /tmp/reclone
+          grep -q $'^cloned\tvendor/widget\t' /tmp/reclone
+          test -d /tmp/fixture/vendor/widget/.git
 
           "$HOME/.local/bin/ghsync-thirdparty" remove vendor/widget --porcelain | tee /tmp/third-remove
           grep -q $'^untracked\tvendor/widget\t' /tmp/third-remove
