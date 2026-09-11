@@ -1,8 +1,155 @@
-/* GitHub Sync — third-party repository management. */
+/* GitHub Sync — third-party and repository-manager extensions. */
 (function () {
     "use strict";
 
     function $(id) { return document.getElementById(id); }
+
+    /* ------------------------------------------------ repository action menu */
+
+    var repoActions = [];
+    var openMenu = null;
+    var openTrigger = null;
+
+    function installManagerStyles() {
+        if ($("ghs-manager-style")) return;
+        var style = document.createElement("style");
+        style.id = "ghs-manager-style";
+        style.textContent =
+            ".ghs-menu-wrap{position:relative;display:inline-block}" +
+            ".ghs-kebab{min-width:2rem;padding:.25rem .55rem;font-size:1.15rem;line-height:1}" +
+            ".ghs-action-menu{position:absolute;right:0;top:calc(100% + .25rem);z-index:50;min-width:12rem;padding:.25rem;" +
+                "background:var(--pf-v5-global--BackgroundColor--100,#fff);border:1px solid var(--pf-v5-global--BorderColor--100,#d2d2d2);" +
+                "border-radius:3px;box-shadow:0 4px 12px rgba(0,0,0,.18);text-align:left}" +
+            ".ghs-action-menu button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:.45rem .65rem;cursor:pointer}" +
+            ".ghs-action-menu button:hover:not(:disabled){background:rgba(3,102,214,.08)}" +
+            ".ghs-action-menu button:disabled{opacity:.5;cursor:not-allowed}" +
+            ".ghs-action-menu__sep{height:1px;background:#d2d2d2;margin:.25rem 0}";
+        document.head.appendChild(style);
+    }
+
+    function closeActionMenu() {
+        if (openMenu) openMenu.classList.add("ghs-hidden");
+        if (openTrigger) openTrigger.setAttribute("aria-expanded", "false");
+        openMenu = null;
+        openTrigger = null;
+    }
+
+    function menuButton(label, handler, disabled, title) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.disabled = !!disabled;
+        if (title) button.title = title;
+        button.onclick = function (event) {
+            event.stopPropagation();
+            if (button.disabled) return;
+            closeActionMenu();
+            handler();
+        };
+        return button;
+    }
+
+    function compactRepositoryRow(row) {
+        var actionCell = row.querySelector("td.ghs-table__action");
+        if (!actionCell || actionCell.dataset.managerReady === "yes") return;
+        var builtins = row._ghsyncBuiltins;
+        if (!builtins) {
+            var original = Array.prototype.slice.call(actionCell.querySelectorAll("button"));
+            if (!original.length) return;
+            builtins = original.map(function (button) {
+                return {
+                    label: button.textContent.trim(),
+                    disabled: button.disabled,
+                    title: button.title,
+                    run: function () { button.click(); }
+                };
+            });
+            row._ghsyncBuiltins = builtins;
+        }
+
+        var nameCell = row.querySelector("td.ghs-repo-name");
+        var repoName = nameCell ? nameCell.textContent.trim() : "";
+
+        actionCell.textContent = "";
+        actionCell.dataset.managerReady = "yes";
+
+        var wrap = document.createElement("div");
+        wrap.className = "ghs-menu-wrap";
+        var trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.className = "ghs-btn ghs-btn--secondary ghs-btn--sm ghs-kebab";
+        trigger.textContent = "⋮";
+        trigger.setAttribute("aria-label", "Actions for " + repoName);
+        trigger.setAttribute("aria-haspopup", "menu");
+        trigger.setAttribute("aria-expanded", "false");
+
+        var menu = document.createElement("div");
+        menu.className = "ghs-action-menu ghs-hidden";
+        menu.setAttribute("role", "menu");
+
+        builtins.forEach(function (action) {
+            menu.appendChild(menuButton(action.label, action.run, action.disabled, action.title));
+        });
+
+        if (repoActions.length) {
+            var sep = document.createElement("div");
+            sep.className = "ghs-action-menu__sep";
+            menu.appendChild(sep);
+            repoActions.forEach(function (action) {
+                var state = action.state ? action.state(repoName, row) : {};
+                menu.appendChild(menuButton(action.label, function () { action.run(repoName, row); },
+                    state && state.disabled, state && state.title));
+            });
+        }
+
+        trigger.onclick = function (event) {
+            event.stopPropagation();
+            var opening = menu.classList.contains("ghs-hidden");
+            closeActionMenu();
+            if (opening) {
+                menu.classList.remove("ghs-hidden");
+                openMenu = menu;
+                openTrigger = trigger;
+                trigger.setAttribute("aria-expanded", "true");
+            }
+        };
+        wrap.appendChild(trigger);
+        wrap.appendChild(menu);
+        actionCell.appendChild(wrap);
+    }
+
+    function compactRepositoryActions() {
+        var body = $("repos");
+        if (!body) return;
+        body.querySelectorAll("tr").forEach(compactRepositoryRow);
+    }
+
+    window.GHSyncRepoManager = {
+        registerAction: function (action) {
+            repoActions.push(action);
+            var body = $("repos");
+            if (body) {
+                body.querySelectorAll("tr").forEach(function (row) {
+                    var cell = row.querySelector("td.ghs-table__action");
+                    if (cell) cell.removeAttribute("data-manager-ready");
+                });
+            }
+            compactRepositoryActions();
+        },
+        refreshMenus: compactRepositoryActions
+    };
+
+    installManagerStyles();
+    document.addEventListener("click", closeActionMenu);
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeActionMenu();
+    });
+    if ($("repos")) {
+        new MutationObserver(compactRepositoryActions).observe($("repos"), { childList: true, subtree: true });
+        compactRepositoryActions();
+    }
+
+    /* --------------------------------------------- third-party repositories */
 
     var tabs = document.querySelector(".ghs-tabs");
     var reposPanel = $("panel-repos");
