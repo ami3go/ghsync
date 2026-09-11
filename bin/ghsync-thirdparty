@@ -93,16 +93,18 @@ repo_path() {
 }
 
 clone_repo() {
-    local name="$1" url="$2" dest="$ROOT/$name" origin out
+    local name="$1" url="$2" origin out existing dest
     local -a args=(--recurse-submodules --quiet)
+    dest="$ROOT/$name"
     case "$CLONE_FILTER" in
         blob:none|tree:0) args+=(--filter="$CLONE_FILTER") ;;
         depth:*)          args+=(--depth "${CLONE_FILTER#depth:}" --no-single-branch) ;;
         *)                : ;;
     esac
 
-    if [[ -n "$(repo_path "$name")" ]]; then
-        origin=$(git -C "$ROOT/$name" remote get-url origin 2>/dev/null || true)
+    existing=$(repo_path "$name")
+    if [[ -n "$existing" ]]; then
+        origin=$(git -C "$existing" remote get-url origin 2>/dev/null || true)
         if [[ -n "$origin" && "$origin" != "$url" ]]; then
             fail "$name already exists with a different origin: $origin"
         fi
