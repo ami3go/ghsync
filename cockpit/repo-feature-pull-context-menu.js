@@ -11,9 +11,14 @@
         var style = document.createElement("style");
         style.id = "ghs-context-menu-style";
         style.textContent =
-            ".ghs-row-actions{display:inline-flex;align-items:center;justify-content:flex-end;gap:.375rem;flex-wrap:nowrap;white-space:nowrap}" +
-            ".ghs-row-actions>.ghs-btn,.ghs-row-actions>.ghs-menu-wrap{flex:0 0 auto}" +
-            ".ghs-context-overlay{position:fixed!important;right:auto!important;top:auto!important;z-index:2147483000!important;min-width:13rem;max-height:calc(100vh - 16px);overflow:auto}";
+            ".ghs-table__action{white-space:nowrap!important}" +
+            ".ghs-row-actions{display:inline-flex!important;align-items:center;justify-content:flex-end;gap:.375rem;flex-wrap:nowrap!important;white-space:nowrap!important;vertical-align:middle}" +
+            ".ghs-row-actions>.ghs-btn{display:inline-flex!important;flex:0 0 auto!important}" +
+            ".ghs-context-overlay{position:fixed!important;right:auto!important;bottom:auto!important;z-index:2147483000!important;min-width:13rem;max-width:min(22rem,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;background:#fff;border:1px solid #d2d2d2;border-radius:3px;box-shadow:0 4px 12px rgba(0,0,0,.28);padding:.25rem;text-align:left}" +
+            ".ghs-context-overlay button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:.45rem .65rem;cursor:pointer}" +
+            ".ghs-context-overlay button:hover:not(:disabled),.ghs-context-overlay button:focus:not(:disabled){background:rgba(3,102,214,.08);outline:none}" +
+            ".ghs-context-overlay button:disabled{opacity:.5;cursor:not-allowed}" +
+            ".ghs-context-overlay .ghs-action-menu__sep{height:1px;background:#d2d2d2;margin:.25rem 0}";
         document.head.appendChild(style);
     }
 
@@ -35,114 +40,146 @@
 
         if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
         if (left < margin) left = margin;
-        if (top + height > window.innerHeight - margin) {
+        if (top + height > window.innerHeight - margin)
             top = pointer ? clientY - height : (rect ? rect.top - height - 4 : margin);
-        }
         if (top < margin) top = margin;
 
         menu.style.left = Math.round(left) + "px";
         menu.style.top = Math.round(top) + "px";
     }
 
-    function sourceButton(menu, label) {
-        var buttons = menu ? menu.querySelectorAll("button") : [];
-        for (var i = 0; i < buttons.length; i += 1) {
-            if (buttons[i].textContent.trim() === label) return buttons[i];
+    function rowName(row) {
+        if (m.rowName) return m.rowName(row);
+        if (row.dataset.repoName) return row.dataset.repoName;
+        var cell = row.querySelector(".ghs-repo-name");
+        return cell ? cell.textContent.trim() : "";
+    }
+
+    function builtinActions(row) {
+        return (row._ghsyncBuiltins || []).slice();
+    }
+
+    function findBuiltin(row, label) {
+        var actions = builtinActions(row);
+        for (var i = 0; i < actions.length; i += 1) {
+            if (actions[i].label === label) return actions[i];
         }
         return null;
     }
 
-    function buildOverlay(sourceMenu, trigger, clientX, clientY) {
+    function addMenuButton(menu, label, run, state) {
+        state = state || {};
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.disabled = !!state.disabled;
+        if (state.title) button.title = state.title;
+        button.setAttribute("role", "menuitem");
+        button.onclick = function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (button.disabled) return;
+            closeOverlay();
+            run();
+        };
+        menu.appendChild(button);
+    }
+
+    function addSeparator(menu) {
+        if (!menu.children.length) return;
+        var sep = document.createElement("div");
+        sep.className = "ghs-action-menu__sep";
+        sep.setAttribute("role", "separator");
+        menu.appendChild(sep);
+    }
+
+    function buildOverlay(row, trigger, clientX, clientY) {
         closeOverlay();
-        if (!sourceMenu) return;
+        var name = rowName(row);
+        var menu = document.createElement("div");
+        menu.className = "ghs-context-overlay";
+        menu.setAttribute("role", "menu");
+        menu.setAttribute("aria-label", "Actions for " + name);
 
-        var overlay = document.createElement("div");
-        overlay.className = "ghs-action-menu ghs-context-overlay";
-        overlay.setAttribute("role", "menu");
-
-        Array.prototype.slice.call(sourceMenu.children).forEach(function (child) {
-            if (child.classList.contains("ghs-action-menu__sep")) {
-                overlay.appendChild(child.cloneNode(false));
-                return;
-            }
-            if (child.tagName !== "BUTTON" || child.textContent.trim() === "Pull") return;
-
-            var button = document.createElement("button");
-            button.type = "button";
-            button.textContent = child.textContent;
-            button.disabled = child.disabled;
-            button.title = child.title || "";
-            button.setAttribute("role", "menuitem");
-            button.onclick = function (event) {
-                event.stopPropagation();
-                closeOverlay();
-                if (!button.disabled) child.click();
-            };
-            overlay.appendChild(button);
+        builtinActions(row).forEach(function (action) {
+            if (action.label === "Pull") return;
+            addMenuButton(menu, action.label, action.run, action.state);
         });
 
-        /* Remove separators left at either edge after Pull is omitted. */
-        while (overlay.firstElementChild && overlay.firstElementChild.classList.contains("ghs-action-menu__sep"))
-            overlay.firstElementChild.remove();
-        while (overlay.lastElementChild && overlay.lastElementChild.classList.contains("ghs-action-menu__sep"))
-            overlay.lastElementChild.remove();
-        if (!overlay.children.length) return;
+        if (m.actions && m.actions.length) {
+            addSeparator(menu);
+            m.actions.forEach(function (action) {
+                var state = action.state ? action.state(name, row) : {};
+                addMenuButton(menu, action.label, function () { action.run(name, row); }, state);
+            });
+        }
 
-        document.body.appendChild(overlay);
-        openOverlay = overlay;
+        while (menu.lastElementChild && menu.lastElementChild.classList.contains("ghs-action-menu__sep"))
+            menu.lastElementChild.remove();
+        if (!menu.children.length) return;
+
+        document.body.appendChild(menu);
+        openOverlay = menu;
         openTrigger = trigger;
         trigger.setAttribute("aria-expanded", "true");
-        placeOverlay(overlay, trigger, clientX, clientY);
+        placeOverlay(menu, trigger, clientX, clientY);
 
-        var first = overlay.querySelector("button:not(:disabled)");
+        var first = menu.querySelector("button:not(:disabled)");
         if (first) first.focus({ preventScroll: true });
     }
 
     function applyRow(row) {
         var cell = row.querySelector("td.ghs-table__action");
         if (!cell || cell.dataset.contextOverlayReady === "yes") return;
-        var wrap = cell.querySelector(".ghs-menu-wrap");
-        var trigger = cell.querySelector(".ghs-kebab");
-        var sourceMenu = cell.querySelector(".ghs-action-menu");
-        if (!wrap || !trigger || !sourceMenu) return;
+        if (!row._ghsyncBuiltins || !row._ghsyncBuiltins.length) return;
 
+        var name = rowName(row);
+        var pullAction = findBuiltin(row, "Pull");
         var cluster = document.createElement("div");
         cluster.className = "ghs-row-actions";
 
-        var pullSource = sourceButton(sourceMenu, "Pull");
-        if (pullSource) {
+        if (pullAction) {
             var pull = document.createElement("button");
             pull.type = "button";
             pull.className = "ghs-btn ghs-btn--secondary ghs-btn--sm ghs-primary-pull";
             pull.textContent = "Pull";
-            pull.disabled = pullSource.disabled;
-            if (pullSource.title) pull.title = pullSource.title;
+            pull.disabled = !!(pullAction.state && pullAction.state.disabled);
+            if (pullAction.state && pullAction.state.title) pull.title = pullAction.state.title;
             pull.onclick = function (event) {
+                event.preventDefault();
                 event.stopPropagation();
                 closeOverlay();
-                if (!pull.disabled) pullSource.click();
+                if (!pull.disabled) pullAction.run();
             };
             cluster.appendChild(pull);
         }
 
-        cluster.appendChild(wrap);
-        cell.appendChild(cluster);
-        cell.dataset.contextOverlayReady = "yes";
-
-        /* The original menu remains hidden as the action source only. */
-        sourceMenu.classList.add("ghs-hidden");
+        var trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.className = "ghs-btn ghs-btn--secondary ghs-btn--sm ghs-kebab";
+        trigger.textContent = "⋮";
+        trigger.setAttribute("aria-label", "Actions for " + name);
+        trigger.setAttribute("aria-haspopup", "menu");
+        trigger.setAttribute("aria-expanded", "false");
         trigger.onclick = function (event) {
             event.preventDefault();
             event.stopPropagation();
             if (openTrigger === trigger) closeOverlay();
-            else buildOverlay(sourceMenu, trigger);
+            else buildOverlay(row, trigger);
         };
+        cluster.appendChild(trigger);
+
+        /* Replace the manager's temporary nested menu with one explicit inline group. */
+        cell.textContent = "";
+        cell.appendChild(cluster);
+        cell.dataset.contextOverlayReady = "yes";
+        cell.dataset.managerReady = "yes";
 
         row.addEventListener("contextmenu", function (event) {
             if (event.target.closest("button,input,select,textarea,a")) return;
             event.preventDefault();
             event.stopPropagation();
-            buildOverlay(sourceMenu, trigger, event.clientX, event.clientY);
+            buildOverlay(row, trigger, event.clientX, event.clientY);
         });
     }
 
