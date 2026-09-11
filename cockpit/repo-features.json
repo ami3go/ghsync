@@ -1,4 +1,5 @@
 [
+  "repo-feature-release.js",
   "repo-feature-push.js",
   "repo-feature-details.js",
   "repo-feature-open.js",
@@ -15,5 +16,6 @@
   "repo-feature-policy.js",
   "repo-feature-notifications.js",
   "repo-feature-backup.js",
-  "repo-feature-maintenance.js"
+  "repo-feature-maintenance.js",
+  "repo-feature-thirdparty-menu.js"
 ]
