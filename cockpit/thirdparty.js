@@ -2,13 +2,65 @@
 (function () {
     "use strict";
 
+    function $(id) { return document.getElementById(id); }
+
+    var tabs = document.querySelector(".ghs-tabs");
+    var reposPanel = $("panel-repos");
+    if (!tabs || !reposPanel) return;
+
+    var tab = $("tab-thirdparty");
+    if (!tab) {
+        tab = document.createElement("button");
+        tab.id = "tab-thirdparty";
+        tab.className = "ghs-tab";
+        tab.type = "button";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", "false");
+        tab.dataset.tab = "thirdparty";
+        tab.textContent = "3rd party repositories";
+        var statsTab = tabs.querySelector('[data-tab="stats"]');
+        tabs.insertBefore(tab, statsTab || null);
+    }
+
+    var panel = $("panel-thirdparty");
+    if (!panel) {
+        panel = document.createElement("section");
+        panel.id = "panel-thirdparty";
+        panel.className = "ghs-tab-panel ghs-hidden";
+        panel.setAttribute("role", "tabpanel");
+        panel.innerHTML =
+            '<div class="ghs-form" style="margin-bottom:1rem">' +
+                '<div class="ghs-form-group">' +
+                    '<label class="ghs-label" for="third-url">Public Git repository URL</label>' +
+                    '<div class="ghs-form-actions">' +
+                        '<input id="third-url" class="ghs-input" type="text" placeholder="https://github.com/owner/repository.git" autocomplete="off">' +
+                        '<button id="btn-third-add" class="ghs-btn ghs-btn--primary" type="button">Clone and track</button>' +
+                    '</div>' +
+                    '<p class="ghs-helper">GitHub, GitLab, Codeberg and other Git URLs are supported. The final owner/repository pair determines the local path.</p>' +
+                '</div>' +
+            '</div>' +
+            '<div class="ghs-toolbar">' +
+                '<span class="ghs-toolbar__count" id="third-count"></span>' +
+                '<span class="ghs-toolbar__spacer"></span>' +
+                '<button id="btn-third-refresh" class="ghs-btn ghs-btn--secondary ghs-btn--sm" type="button">Refresh</button>' +
+            '</div>' +
+            '<p id="third-message" class="ghs-helper"></p>' +
+            '<div class="ghs-table-wrap ghs-hidden" id="third-wrap">' +
+                '<table class="ghs-table">' +
+                    '<thead><tr><th scope="col">Repository</th><th scope="col">Source</th><th scope="col">State</th><th scope="col" class="ghs-table__action"><span class="ghs-sr">Actions</span></th></tr></thead>' +
+                    '<tbody id="third-body"></tbody>' +
+                '</table>' +
+            '</div>' +
+            '<div id="third-empty" class="ghs-empty">' +
+                '<svg class="ghs-empty__icon" aria-hidden="true"><use href="#i-repo"/></svg>' +
+                '<h3 class="ghs-empty__title">No third-party repositories</h3>' +
+                '<p class="ghs-empty__body">Paste a public Git repository URL above to clone and track it.</p>' +
+            '</div>';
+        reposPanel.parentNode.insertBefore(panel, reposPanel.nextSibling);
+    }
+
     var SCRIPT = null;
     var rows = [];
-    var tab = document.getElementById("tab-thirdparty");
-    var panel = document.getElementById("panel-thirdparty");
-    if (!tab || !panel) return;
-
-    function $(id) { return document.getElementById(id); }
 
     function resize() {
         try { cockpit.transport.control("size-change"); } catch (e) { /* not embedded */ }
@@ -145,7 +197,7 @@
         return run(args)
             .then(function () {
                 setMessage(success, false);
-                $("third-url").value = args[0] === "third-party" && args[1] === "add" ? "" : $("third-url").value;
+                if (args[0] === "third-party" && args[1] === "add") $("third-url").value = "";
                 return refresh();
             })
             .then(refreshMainPage)
@@ -192,4 +244,5 @@
     document.querySelectorAll(".ghs-tab").forEach(function (item) {
         observer.observe(item, { attributes: true, attributeFilter: ["class", "aria-selected"] });
     });
+    resize();
 })();
