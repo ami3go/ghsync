@@ -4,6 +4,11 @@
     var m = window.GHSyncRepoManager;
     if (!m) return;
 
+    function validateNewBranch(name, branch) {
+        if (!branch || branch.charAt(0) === "-") return Promise.reject(new Error("Invalid branch name"));
+        return m.runGit(name, ["check-ref-format", "--branch", branch]);
+    }
+
     function manageBranches(name) {
         Promise.all([
             m.runGit(name, ["branch", "--format=%(refname:short)"]),
@@ -16,17 +21,18 @@
             answer = answer.trim(); if (!answer) return;
             if (answer.charAt(0) === "+") {
                 var created = answer.slice(1).trim();
-                if (!created) throw new Error("Branch name is required");
-                return m.runGit(name, ["switch", "-c", created]);
+                return validateNewBranch(name, created)
+                    .then(function () { return m.runGit(name, ["switch", "-c", created]); });
             }
             if (answer.charAt(0) === "-") {
                 var removed = answer.slice(1).trim();
-                if (!removed) throw new Error("Branch name is required");
+                if (!removed || branches.indexOf(removed) < 0) throw new Error("Choose an existing local branch to delete");
                 if (removed === current) throw new Error("Switch away from " + removed + " before deleting it");
                 if (!window.confirm("Delete local branch " + removed + "? Git will refuse if it is not safely merged.")) return;
-                return m.runGit(name, ["branch", "-d", removed]);
+                return m.runGit(name, ["branch", "-d", "--", removed]);
             }
-            return m.runGit(name, ["switch", answer]);
+            if (branches.indexOf(answer) < 0) throw new Error("Choose an existing local branch, or use +name to create one");
+            return m.runGit(name, ["switch", "--", answer]);
         }).then(function (result) {
             if (result !== undefined) m.refreshMainPage();
         }).catch(function (e) { window.alert("Branch operation failed for " + name + ": " + (e.message || String(e))); });
