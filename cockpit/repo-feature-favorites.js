@@ -30,10 +30,12 @@
                 cell.title = favorite ? "Favourite" : "";
                 row.dataset.favorite = favorite ? "1" : "0";
             });
-            rows.sort(function (a, b) {
+            var sorted = rows.slice().sort(function (a, b) {
                 var fav = (b.dataset.favorite || "0").localeCompare(a.dataset.favorite || "0");
                 return fav || nameOf(a).localeCompare(nameOf(b));
-            }).forEach(function (row) { body.appendChild(row); });
+            });
+            var changed = sorted.some(function (row, index) { return row !== rows[index]; });
+            if (changed) sorted.forEach(function (row) { body.appendChild(row); });
         }).finally(function () { applying = false; });
     }
 
