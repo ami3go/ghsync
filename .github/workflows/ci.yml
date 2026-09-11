@@ -24,11 +24,43 @@ jobs:
 
       - name: JavaScript syntax
         run: |
-          node --check cockpit/ghsync.js
-          node --check cockpit/thirdparty.js
+          set -e
+          for f in cockpit/*.js; do
+            node --check "$f"
+          done
 
-      - name: Cockpit manifest is valid JSON
-        run: python3 -m json.tool cockpit/manifest.json > /dev/null
+      - name: Cockpit JSON is valid
+        run: |
+          python3 -m json.tool cockpit/manifest.json > /dev/null
+          python3 -m json.tool cockpit/repo-features.json > /dev/null
+
+      - name: Repository feature manifest is complete
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('cockpit')
+          names = json.loads((root / 'repo-features.json').read_text())
+          assert names, 'feature manifest is empty'
+          assert len(names) == len(set(names)), 'duplicate feature entries'
+          assert names[0] == 'repo-feature-release.js', 'release marker must load first'
+          assert names[-1] == 'repo-feature-thirdparty-menu.js', 'third-party compaction must load last'
+          missing = [name for name in names if not (root / name).is_file()]
+          assert not missing, f'missing feature files: {missing}'
+          unexpected = sorted(p.name for p in root.glob('repo-feature-*.js') if p.name not in names)
+          assert not unexpected, f'feature files missing from manifest: {unexpected}'
+          PY
+
+      - name: Repository manager safety checks
+        run: |
+          grep -q 'var version = "26.3"' cockpit/repo-feature-release.js
+          ! grep -Eq -- '--force|--force-with-lease' cockpit/repo-feature-push.js
+          ! grep -Eq -- 'branch.*-D' cockpit/repo-feature-branches.js
+          grep -q 'DISCARD ' cockpit/repo-feature-local-changes.js
+          grep -q 'bundle create' cockpit/repo-feature-backup.js
+          grep -q 'fsck' cockpit/repo-feature-maintenance.js
+          grep -q 'automatic' cockpit/repo-feature-policy.js
 
       - name: Cockpit page DOM test
         run: |
@@ -52,6 +84,16 @@ jobs:
           test -x "$HOME/.local/share/cockpit/ghsync/ghsync"
           test -x "$HOME/.local/share/cockpit/ghsync/ghsync-thirdparty"
           test -f "$HOME/.local/share/cockpit/ghsync/thirdparty.js"
+          test -f "$HOME/.local/share/cockpit/ghsync/repo-features.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path('cockpit')
+          installed = Path.home() / '.local/share/cockpit/ghsync'
+          for name in json.loads((source / 'repo-features.json').read_text()):
+              assert (installed / name).is_file(), f'installer omitted {name}'
+          PY
 
       - name: Script runs without gh configured
         run: |

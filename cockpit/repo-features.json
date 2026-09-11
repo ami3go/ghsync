@@ -1,0 +1,21 @@
+[
+  "repo-feature-release.js",
+  "repo-feature-push.js",
+  "repo-feature-details.js",
+  "repo-feature-open.js",
+  "repo-feature-branches.js",
+  "repo-feature-check-updates.js",
+  "repo-feature-push-all.js",
+  "repo-feature-groups.js",
+  "repo-feature-favorites.js",
+  "repo-feature-selective-clone.js",
+  "repo-feature-discover-thirdparty.js",
+  "repo-feature-local-changes.js",
+  "repo-feature-commit-selected.js",
+  "repo-feature-history.js",
+  "repo-feature-policy.js",
+  "repo-feature-notifications.js",
+  "repo-feature-backup.js",
+  "repo-feature-maintenance.js",
+  "repo-feature-thirdparty-menu.js"
+]
