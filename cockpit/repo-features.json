@@ -9,5 +9,6 @@
   "repo-feature-favorites.js",
   "repo-feature-selective-clone.js",
   "repo-feature-discover-thirdparty.js",
-  "repo-feature-local-changes.js"
+  "repo-feature-local-changes.js",
+  "repo-feature-commit-selected.js"
 ]
