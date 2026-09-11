@@ -14,15 +14,21 @@
     orphan.parentNode.insertBefore(button, orphan);
 
     button.onclick = function () {
-        var names = Array.prototype.map.call(document.querySelectorAll("#repos tr .ghs-repo-name"), function (el) { return el.textContent.trim(); });
-        if (!names.length) return;
         button.disabled = true; button.textContent = "Checking…";
         var failures = [];
-        Promise.all(names.map(function (name) {
-            return m.runGit(name, ["fetch", "--all", "--prune", "--tags", "--quiet"])
-                .catch(function (e) { failures.push(name + ": " + (e.message || String(e))); });
-        })).then(function () { m.refreshMainPage(); })
-          .then(function () { if (failures.length) window.alert("Some repositories could not be fetched:\n\n" + failures.join("\n")); })
-          .finally(function () { button.disabled = false; button.textContent = "Check updates"; });
+        m.statusSnapshot().then(function (repos) {
+            if (!repos.length) throw new Error("No local repositories were found");
+            return m.mapLimit(repos, 4, function (repo) {
+                return m.runGit(repo.name, ["fetch", "--all", "--prune", "--tags", "--quiet"])
+                    .catch(function (e) { failures.push(repo.name + ": " + (e.message || String(e))); });
+            });
+        }).then(function () {
+            m.refreshMainPage();
+            if (failures.length) window.alert("Some repositories could not be fetched:\n\n" + failures.join("\n"));
+        }).catch(function (e) {
+            window.alert("Update check failed: " + (e.message || String(e)));
+        }).finally(function () {
+            button.disabled = false; button.textContent = "Check updates";
+        });
     };
 })();
