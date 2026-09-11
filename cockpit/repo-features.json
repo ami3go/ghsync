@@ -11,5 +11,6 @@
   "repo-feature-discover-thirdparty.js",
   "repo-feature-local-changes.js",
   "repo-feature-commit-selected.js",
-  "repo-feature-history.js"
+  "repo-feature-history.js",
+  "repo-feature-policy.js"
 ]
