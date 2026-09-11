@@ -22,6 +22,16 @@
         match = value.match(/^[^@]+@([^:]+):/);
         return match ? match[1].toLowerCase() : "";
     }
+    function containsHttpSecret(url) {
+        url = (url || "").trim();
+        if (!/^https?:\/\//i.test(url)) return false;
+        try {
+            var parsed = new URL(url);
+            return !!(parsed.username || parsed.password || parsed.search || parsed.hash);
+        } catch (e) {
+            return /^(?:https?):\/\/[^/]*@/i.test(url) || /[?#]/.test(url);
+        }
+    }
 
     button.onclick = function () {
         button.disabled = true; button.textContent = "Scanning…";
@@ -34,13 +44,15 @@
             var repos = values[2].filter(function (repo) { return !tracked[repo.name]; });
             return m.mapLimit(repos, 8, function (repo) {
                 return m.runGit(repo.name, ["remote", "get-url", "origin"]).then(function (url) {
+                    url = url.trim();
+                    if (containsHttpSecret(url)) return null;
                     var owner = repo.name.split("/")[0].toLowerCase(), host = remoteHost(url);
-                    return (!managed[owner] || (host && host !== githubHost)) ? { name: repo.name, url: url.trim() } : null;
+                    return (!managed[owner] || (host && host !== githubHost)) ? { name: repo.name, url: url } : null;
                 }).catch(function () { return null; });
             });
         }).then(function (items) {
             items = items.filter(Boolean);
-            if (!items.length) { window.alert("No untracked third-party clones were found."); return; }
+            if (!items.length) { window.alert("No untracked public third-party clones were found."); return; }
             var text = items.map(function (item) { return item.name + "  ←  " + item.url; }).join("\n");
             var choice = window.prompt("Discovered local repositories:\n\n" + text + "\n\nEnter owner/repository to track, or ALL to track every discovered repository:", items[0].name);
             if (choice === null) return;
