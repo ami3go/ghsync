@@ -174,7 +174,14 @@ list_repos() {
 # Third-party registry rows as: <owner/repo>\t<clone-url>.
 third_party_repos() {
     [[ -f "$THIRD_PARTY_FILE" ]] || return 0
-    awk -F '\t' 'NF >= 2 && $1 != "" && $2 != "" { print $1 "\t" $2 }' "$THIRD_PARTY_FILE" | filter_excluded
+    local name url
+    while IFS=$'\t' read -r name url _; do
+        [[ "$name" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || continue
+        [[ -n "$url" && "$url" != *' '* && "$url" != *$'\t'* ]] || continue
+        [[ ! "$url" =~ ^https?://[^/]*@ ]] || continue
+        [[ "$url" != *'?'* && "$url" != *'#'* ]] || continue
+        printf '%s\t%s\n' "$name" "$url"
+    done <"$THIRD_PARTY_FILE" | filter_excluded
 }
 
 # Every repository managed by ghsync. GitHub wins if a registry row reuses a name.
@@ -430,10 +437,15 @@ do_stats() {
 
 # ------------------------------------------------------------ parallel runs ---
 start_run() {
+    local mode="${1:-write}"
     RESULT_FILE=$(mktemp "$STATE_DIR/run.XXXXXX")
     UNPUSHED_FILE=$(mktemp "$STATE_DIR/unpushed.XXXXXX")
-    FAILED_FILE="$STATE_DIR/failed.tsv"
-    : >"$FAILED_FILE"
+    if [[ "$mode" == "readonly" ]]; then
+        FAILED_FILE=""
+    else
+        FAILED_FILE="$STATE_DIR/failed.tsv"
+        : >"$FAILED_FILE"
+    fi
     export GHSYNC_RESULT="$RESULT_FILE" GHSYNC_UNPUSHED="$UNPUSHED_FILE" GHSYNC_FAILED="$FAILED_FILE"
     export GHSYNC_ROOT="$ROOT" GHSYNC_OWNERS="$OWNERS" GHSYNC_PROTOCOL="$PROTOCOL"
     export GHSYNC_JOBS="$JOBS" GHSYNC_QUIET="$QUIET" GHSYNC_PORCELAIN="$PORCELAIN"
@@ -556,7 +568,7 @@ action_status() {
     local list; list=$(local_repos)
     [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
     [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
-    start_run
+    start_run readonly
     printf '%s\n' "$list" | run_parallel status
     finish_run
 }
@@ -602,7 +614,7 @@ action_stats() {
     local list; list=$(local_repos)
     [[ -n "$FILTER" ]] && list=$(printf '%s\n' "$list" | grep -Fx "$FILTER")
     [[ -z "$list" ]] && { err "no matching local clones under $ROOT"; return 1; }
-    start_run
+    start_run readonly
     printf '%s\n' "$list" | run_parallel stats
     finish_run
 }
