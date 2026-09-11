@@ -21,6 +21,7 @@
     /* How each porcelain tag is presented. */
     var TAGS = {
         cloned:        { tone: "green", icon: "i-check", text: "Cloned" },
+        committed:     { tone: "green", icon: "i-check", text: "Committed" },
         updated:       { tone: "green", icon: "i-check", text: "Updated" },
         "up-to-date":  { tone: "muted", icon: "i-check", text: "Up to date" },
         exists:        { tone: "muted", icon: "i-check", text: "Already cloned" },
@@ -337,12 +338,34 @@
 
             var act = document.createElement("td");
             act.className = "ghs-table__action";
-            var btn = document.createElement("button");
-            btn.className = "ghs-btn ghs-btn--secondary ghs-btn--sm";
-            btn.type = "button";
-            btn.textContent = "Pull";
-            btn.onclick = function () { action(["pull", r.name], "Pulling " + r.name); };
-            act.appendChild(btn);
+
+            var pullBtn = document.createElement("button");
+            pullBtn.className = "ghs-btn ghs-btn--secondary ghs-btn--sm";
+            pullBtn.type = "button";
+            pullBtn.textContent = "Pull";
+            pullBtn.onclick = function () { action(["pull", r.name], "Pulling " + r.name); };
+            act.appendChild(pullBtn);
+
+            var commitBtn = document.createElement("button");
+            commitBtn.className = "ghs-btn ghs-btn--secondary ghs-btn--sm";
+            commitBtn.type = "button";
+            commitBtn.textContent = "Commit";
+            commitBtn.style.marginLeft = "0.375rem";
+            commitBtn.disabled = Number(r.dirty) === 0 || r.branch === "mirror" || r.branch === "detached";
+            if (r.branch === "mirror") commitBtn.title = "Bare mirrors have no working tree to commit";
+            else if (r.branch === "detached") commitBtn.title = "Switch to a branch before committing";
+            else if (Number(r.dirty) === 0) commitBtn.title = "No uncommitted changes";
+            commitBtn.onclick = function () {
+                var message = window.prompt("Commit message for " + r.name + ":");
+                if (message === null) return;
+                message = message.trim();
+                if (!message) {
+                    alert("warning", "Commit message required", "Enter a commit message for " + r.name + ".");
+                    return;
+                }
+                action(["commit", r.name, message], "Committing changes in " + r.name);
+            };
+            act.appendChild(commitBtn);
             tr.appendChild(act);
 
             tbody.appendChild(tr);

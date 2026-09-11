@@ -127,6 +127,16 @@ setTimeout(() => {
     assert($("repos-empty").classList.contains("ghs-hidden"), "empty state hidden when rows exist");
     assert($("repo-count").textContent === "3 repositories", "toolbar count rendered");
 
+    const apiRow = [...rows].find((r) => r.children[0].textContent === "acme/api");
+    const webRow = [...rows].find((r) => r.children[0].textContent === "acme/web");
+    const infraRow = [...rows].find((r) => r.children[0].textContent === "acme/infra");
+    const button = (row, text) => [...row.querySelectorAll("button")].find((b) => b.textContent === text);
+    assert(button(apiRow, "Pull") !== undefined && button(apiRow, "Commit") !== undefined,
+           "Pull and Commit actions render side by side");
+    assert(button(apiRow, "Commit").disabled === true, "commit disabled for a clean repository");
+    assert(button(webRow, "Commit").disabled === false, "commit enabled for a dirty repository");
+    assert(button(infraRow, "Commit").disabled === true, "commit disabled on detached HEAD");
+
     console.log("\n--- filter ---");
     $("filter").value = "web";
     $("filter").dispatchEvent(new window.Event("input"));

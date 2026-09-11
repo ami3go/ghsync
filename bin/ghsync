@@ -5,6 +5,7 @@
 #   ghsync                      launch the TUI
 #   ghsync clone                clone every repo that is missing locally
 #   ghsync pull                 fetch + fast-forward every local repo
+#   ghsync commit REPO MESSAGE  stage changes and create a local commit
 #   ghsync sync                 clone missing, then pull everything
 #   ghsync status               show branch / dirty / ahead-behind for each repo
 #   ghsync cron install "0 */6 * * *"
@@ -315,6 +316,41 @@ do_pull() {
     fi
 }
 
+do_commit() {
+    local name="$1" message="$2" d out branch sha
+    d=$(repo_path "$name")
+    [[ -n "$d" ]] || { report "skipped" "$C_DIM" "$name" "not a git repo"; return 1; }
+
+    if is_bare "$d"; then
+        report "skipped" "$C_DIM" "$name" "bare mirror has no working tree"
+        return 1
+    fi
+    if ! branch=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+        report "detached" "$C_YELLOW" "$name" "switch to a branch before committing"
+        return 1
+    fi
+    if [[ -z "$(git -C "$d" status --porcelain 2>/dev/null)" ]]; then
+        report "clean" "$C_DIM" "$name" "nothing to commit"
+        return 0
+    fi
+    if [[ -z "$message" ]]; then
+        report "failed" "$C_RED" "$name" "commit message is required"
+        return 1
+    fi
+
+    if ! out=$(run_git -C "$d" add -A 2>&1); then
+        report "failed" "$C_RED" "$name" "git add: ${out##*$'\n'}"
+        return 1
+    fi
+    if out=$(run_git -C "$d" commit -m "$message" 2>&1); then
+        sha=$(git -C "$d" rev-parse --short HEAD 2>/dev/null || echo "?")
+        report "committed" "$C_GREEN" "$name" "$branch $sha"
+    else
+        report "failed" "$C_RED" "$name" "git commit: ${out##*$'\n'}"
+        return 1
+    fi
+}
+
 do_status() {
     local name="$1" d branch dirty ahead behind counts stashes unpushed work
     d=$(repo_path "$name")
@@ -480,6 +516,19 @@ action_pull() {
     start_run
     printf '%s\n' "$list" | run_parallel pull
     finish_run
+}
+
+action_commit() {
+    local name="$1" message="$2"
+    acquire_lock || return 1
+    rotate_log
+    [[ -n "$name" ]] || { err "repository name is required"; return 1; }
+    [[ -n "$message" ]] || { err "commit message is required"; return 1; }
+    start_run
+    do_commit "$name" "$message"
+    local rc=$?
+    finish_run
+    return "$rc"
 }
 
 action_sync() {
@@ -848,6 +897,7 @@ Usage:
   ghsync                          launch the interactive TUI
   ghsync clone                    clone every repo missing from \$ROOT
   ghsync pull                     fetch + fast-forward every local repo
+  ghsync commit OWNER/REPO "msg"  stage all changes and create a local commit
   ghsync sync                     clone missing, then pull everything
   ghsync status                   per-repo branch / dirty / ahead-behind
   ghsync stats                    per-repo commits, branches, tags, size, last commit
@@ -930,6 +980,7 @@ case "$CMD" in
     ""|tui)       preflight || exit 1; tui ;;
     clone)        action_clone ;;
     pull|update)  action_pull ;;
+    commit)       action_commit "$SUB" "${POS[2]:-}" ;;
     sync)         action_sync ;;
     status)       action_status ;;
     stats)        action_stats ;;

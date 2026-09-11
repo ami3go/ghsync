@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install for the runner user
-        run: ./install.sh
+        run: bash ./install.sh
 
       - name: Command and Cockpit page are in place
         run: |
@@ -54,7 +54,7 @@ jobs:
           "$HOME/.local/bin/ghsync" config
           "$HOME/.local/bin/ghsync" check
 
-      - name: Clone, pull and status against a local fixture
+      - name: Clone, pull, commit and status against a local fixture
         run: |
           set -e
           git config --global user.email ci@example.com
@@ -69,7 +69,14 @@ jobs:
           GHSYNC_ROOT=/tmp/fixture "$HOME/.local/bin/ghsync" pull --porcelain | tee /tmp/out
           grep -q '^updated' /tmp/out
 
+          echo local >> /tmp/fixture/acme/demo/file.txt
+          GHSYNC_ROOT=/tmp/fixture "$HOME/.local/bin/ghsync" commit acme/demo "local change" --porcelain | tee /tmp/commit-out
+          grep -q '^committed' /tmp/commit-out
+          test -z "$(git -C /tmp/fixture/acme/demo status --porcelain)"
+          test "$(git -C /tmp/fixture/acme/demo log -1 --format=%s)" = "local change"
+          test "$(git -C /tmp/fixture/acme/demo rev-parse HEAD)" != "$(git --git-dir=/tmp/remote.git rev-parse main)"
+
       - name: Uninstall cleanly
         run: |
-          ./install.sh --uninstall
+          bash ./install.sh --uninstall
           test ! -e "$HOME/.local/bin/ghsync"
