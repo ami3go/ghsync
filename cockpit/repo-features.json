@@ -14,5 +14,6 @@
   "repo-feature-history.js",
   "repo-feature-policy.js",
   "repo-feature-notifications.js",
-  "repo-feature-backup.js"
+  "repo-feature-backup.js",
+  "repo-feature-maintenance.js"
 ]
