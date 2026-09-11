@@ -264,7 +264,7 @@ select.ghs-input { appearance: auto; }
 }
 .ghs-table tbody tr:hover { background: var(--ghs-surface-alt); }
 .ghs-num { text-align: right; }
-.ghs-table__action { width: 1%; text-align: right; }
+.ghs-table__action { width: 1%; text-align: right; white-space: nowrap; }
 .ghs-repo-name { font-family: var(--ghs-font-mono); }
 .ghs-zero { color: var(--ghs-text-disabled); }
 
