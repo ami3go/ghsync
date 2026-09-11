@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install for the runner user
-        run: ./install.sh
+        run: bash ./install.sh
 
       - name: Command and Cockpit page are in place
         run: |
@@ -78,5 +78,5 @@ jobs:
 
       - name: Uninstall cleanly
         run: |
-          ./install.sh --uninstall
+          bash ./install.sh --uninstall
           test ! -e "$HOME/.local/bin/ghsync"
