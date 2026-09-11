@@ -27,17 +27,25 @@
     };
 
     m.mapLimit = function (items, limit, worker) {
-        var next = 0, active = 0, results = new Array(items.length);
+        var next = 0, active = 0, stopped = false, results = new Array(items.length);
         limit = Math.max(1, parseInt(limit, 10) || 1);
         return new Promise(function (resolve, reject) {
             function pump() {
+                if (stopped) return;
                 if (next >= items.length && active === 0) { resolve(results); return; }
-                while (active < limit && next < items.length) {
+                while (!stopped && active < limit && next < items.length) {
                     (function (index) {
                         active += 1;
                         Promise.resolve().then(function () { return worker(items[index], index); })
-                            .then(function (value) { results[index] = value; }, reject)
-                            .then(function () { active -= 1; pump(); });
+                            .then(function (value) {
+                                results[index] = value;
+                            }, function (error) {
+                                if (!stopped) { stopped = true; reject(error); }
+                            })
+                            .then(function () {
+                                active -= 1;
+                                if (!stopped) pump();
+                            });
                     })(next++);
                 }
             }
