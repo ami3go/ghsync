@@ -2,5 +2,6 @@
   "repo-feature-push.js",
   "repo-feature-details.js",
   "repo-feature-open.js",
-  "repo-feature-branches.js"
+  "repo-feature-branches.js",
+  "repo-feature-check-updates.js"
 ]
