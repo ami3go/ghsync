@@ -1,0 +1,458 @@
+/*
+ * Cockpit-native visual refinements for GitHub Sync.
+ *
+ * Keep this as a small, dependency-free layer on top of ghsync.css. Cockpit
+ * applications commonly use PatternFly components, but third-party packages
+ * should ship their own styling instead of depending on Cockpit's internal
+ * PatternFly bundle. These rules follow the same visual language without
+ * adding a frontend build system.
+ */
+
+:root {
+    --ghs-bg: #f2f0f0;
+    --ghs-surface: #ffffff;
+    --ghs-surface-alt: #f7f7f7;
+    --ghs-text: #151515;
+    --ghs-text-secondary: #4f5255;
+    --ghs-text-disabled: #6a6e73;
+    --ghs-border: #d2d2d2;
+    --ghs-border-subtle: #e7e7e7;
+    --ghs-primary: #0066cc;
+    --ghs-primary-hover: #004d99;
+    --ghs-link: #0066cc;
+    --ghs-radius: 3px;
+    --ghs-shadow-sm: 0 1px 2px rgba(3, 3, 3, .12), 0 0 2px rgba(3, 3, 3, .06);
+    --ghs-shadow-menu: 0 4px 10px rgba(3, 3, 3, .18), 0 0 2px rgba(3, 3, 3, .12);
+    --ghs-control-height: 2.25rem;
+}
+
+.pf-v6-theme-dark,
+.pf-v5-theme-dark,
+.pf-theme-dark {
+    --ghs-bg: #151515;
+    --ghs-surface: #1b1d21;
+    --ghs-surface-alt: #242629;
+    --ghs-text: #f0f0f0;
+    --ghs-text-secondary: #c7c7c7;
+    --ghs-text-disabled: #a3a3a3;
+    --ghs-border: #57585a;
+    --ghs-border-subtle: #3c3f42;
+    --ghs-primary: #73bcf7;
+    --ghs-primary-hover: #bee1f4;
+    --ghs-link: #73bcf7;
+    --ghs-shadow-sm: 0 1px 2px rgba(0, 0, 0, .45);
+    --ghs-shadow-menu: 0 6px 14px rgba(0, 0, 0, .55);
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not(.pf-v6-theme-light):not(.pf-v5-theme-light):not(.pf-theme-light) {
+        --ghs-bg: #151515;
+        --ghs-surface: #1b1d21;
+        --ghs-surface-alt: #242629;
+        --ghs-text: #f0f0f0;
+        --ghs-text-secondary: #c7c7c7;
+        --ghs-text-disabled: #a3a3a3;
+        --ghs-border: #57585a;
+        --ghs-border-subtle: #3c3f42;
+        --ghs-primary: #73bcf7;
+        --ghs-primary-hover: #bee1f4;
+        --ghs-link: #73bcf7;
+        --ghs-shadow-sm: 0 1px 2px rgba(0, 0, 0, .45);
+        --ghs-shadow-menu: 0 6px 14px rgba(0, 0, 0, .55);
+    }
+}
+
+/* Page --------------------------------------------------------------- */
+body {
+    font-size: 0.9375rem;
+}
+
+.ghs-page {
+    max-width: none;
+}
+
+.ghs-page-section {
+    padding: 1.5rem;
+}
+
+.ghs-page-section--light {
+    padding-block: 1.25rem;
+    border-bottom: 1px solid var(--ghs-border);
+    box-shadow: 0 1px 0 rgba(3, 3, 3, .03);
+}
+
+.ghs-title {
+    font-size: 1.375rem;
+    font-weight: 500;
+    letter-spacing: -.01em;
+}
+
+.ghs-subtitle {
+    margin-top: .125rem;
+    color: var(--ghs-text-secondary);
+}
+
+/* Cards -------------------------------------------------------------- */
+.ghs-card {
+    border: 1px solid var(--ghs-border);
+    border-radius: var(--ghs-radius);
+    box-shadow: var(--ghs-shadow-sm);
+    overflow: visible;
+}
+
+.ghs-card__header {
+    min-height: 3.75rem;
+    padding: .875rem 1rem;
+    border-bottom: 1px solid var(--ghs-border-subtle);
+}
+
+.ghs-card__title {
+    font-size: 1.125rem;
+    font-weight: 500;
+}
+
+.ghs-card__body {
+    padding: 1rem;
+}
+
+/* The tab card supplies its own header through the tab row. */
+.ghs-card > .ghs-tabs:first-child {
+    border-radius: var(--ghs-radius) var(--ghs-radius) 0 0;
+}
+
+/* Buttons ------------------------------------------------------------ */
+.ghs-btn {
+    min-height: var(--ghs-control-height);
+    padding: .375rem .875rem;
+    border-radius: var(--ghs-radius);
+    font-size: .875rem;
+    font-weight: 500;
+    line-height: 1.25;
+}
+
+.ghs-btn--sm {
+    min-height: 2rem;
+    padding: .25rem .625rem;
+    font-size: .8125rem;
+}
+
+.ghs-btn--primary {
+    border-color: var(--ghs-primary);
+    box-shadow: inset 0 0 0 1px transparent;
+}
+
+.ghs-btn--secondary {
+    background: var(--ghs-surface);
+    border-color: var(--ghs-primary);
+}
+
+.ghs-btn--secondary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ghs-primary) 7%, var(--ghs-surface));
+}
+
+.ghs-btn--link {
+    min-height: auto;
+    padding-inline: .5rem;
+    font-weight: 400;
+}
+
+.ghs-btn:focus-visible,
+.ghs-sort:focus-visible,
+.ghs-tab:focus-visible,
+.ghs-alert__close:focus-visible {
+    outline: 2px solid var(--ghs-primary);
+    outline-offset: 2px;
+}
+
+/* Tabs --------------------------------------------------------------- */
+.ghs-tabs {
+    min-height: 3rem;
+    padding: 0 .5rem;
+    background: var(--ghs-surface);
+    border-bottom-color: var(--ghs-border);
+}
+
+.ghs-tab {
+    position: relative;
+    padding: .75rem .875rem .6875rem;
+    border-bottom-width: 3px;
+    color: var(--ghs-text-secondary);
+    font-size: .875rem;
+    font-weight: 500;
+}
+
+.ghs-tab:hover {
+    color: var(--ghs-text);
+    border-bottom-color: var(--ghs-text-disabled);
+}
+
+.ghs-tab--current {
+    color: var(--ghs-text);
+    border-bottom-color: var(--ghs-primary);
+}
+
+.ghs-tab-panel {
+    padding: 1rem;
+}
+
+/* Toolbar and form controls ----------------------------------------- */
+.ghs-toolbar {
+    gap: .5rem .75rem;
+    padding-bottom: .75rem;
+}
+
+.ghs-toolbar__count {
+    font-size: .8125rem;
+}
+
+.ghs-input {
+    min-height: var(--ghs-control-height);
+    padding: .375rem .5rem;
+    border: 1px solid var(--ghs-border);
+    border-bottom-color: var(--ghs-text-disabled);
+    border-radius: var(--ghs-radius);
+    background: var(--ghs-surface);
+    box-shadow: inset 0 1px 1px rgba(3, 3, 3, .04);
+}
+
+.ghs-input:hover:not(:disabled) {
+    border-bottom-color: var(--ghs-text);
+}
+
+.ghs-input:focus {
+    padding-bottom: .375rem;
+    border: 1px solid var(--ghs-primary);
+    box-shadow: inset 0 -2px 0 var(--ghs-primary);
+}
+
+.ghs-search__icon {
+    left: .7rem;
+    width: .875rem;
+    height: .875rem;
+}
+
+.ghs-search__input {
+    padding-left: 2rem;
+}
+
+.ghs-form {
+    gap: 1rem;
+}
+
+.ghs-form-group {
+    gap: .375rem;
+}
+
+.ghs-label {
+    font-size: .875rem;
+    font-weight: 500;
+}
+
+.ghs-helper {
+    font-size: .8125rem;
+}
+
+.ghs-switch__track {
+    width: 2.375rem;
+    height: 1.25rem;
+    border: 1px solid transparent;
+}
+
+/* Overview description list ---------------------------------------- */
+.ghs-dl {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: .875rem 1.5rem;
+}
+
+.ghs-dl__term {
+    margin-bottom: .1875rem;
+    font-size: .75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .025em;
+}
+
+.ghs-dl__desc {
+    font-size: .875rem;
+}
+
+/* Tables ------------------------------------------------------------- */
+.ghs-table-wrap {
+    margin-inline: -1rem;
+    border-top: 1px solid var(--ghs-border-subtle);
+}
+
+.ghs-table {
+    font-size: .875rem;
+}
+
+.ghs-table th {
+    height: 2.75rem;
+    padding: .5rem 1rem;
+    background: var(--ghs-surface-alt);
+    border-bottom-color: var(--ghs-border);
+    color: var(--ghs-text-secondary);
+    font-size: .75rem;
+    font-weight: 500;
+    letter-spacing: .01em;
+}
+
+.ghs-table td {
+    min-height: 3rem;
+    padding: .625rem 1rem;
+    border-bottom-color: var(--ghs-border-subtle);
+}
+
+.ghs-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.ghs-table tbody tr:hover {
+    background: color-mix(in srgb, var(--ghs-primary) 4%, var(--ghs-surface));
+}
+
+.ghs-table__action {
+    padding-right: 1rem !important;
+}
+
+.ghs-repo-name {
+    font-weight: 500;
+}
+
+.ghs-sort {
+    gap: .3rem;
+    font-size: .75rem;
+    font-weight: 500;
+}
+
+/* Metrics, labels and alerts ---------------------------------------- */
+.ghs-metrics {
+    gap: .75rem;
+}
+
+.ghs-metric {
+    min-height: 5rem;
+    padding: .75rem 1rem;
+    background: var(--ghs-surface);
+    border: 1px solid var(--ghs-border);
+    border-radius: var(--ghs-radius);
+}
+
+.ghs-metric__label {
+    font-size: .75rem;
+    font-weight: 500;
+    color: var(--ghs-text-secondary);
+}
+
+.ghs-metric__value {
+    font-size: 1.375rem;
+}
+
+.ghs-label-tag {
+    min-height: 1.5rem;
+    padding: .125rem .5rem;
+    border-color: transparent;
+    border-radius: 999px;
+    background: var(--ghs-surface-alt);
+    font-size: .75rem;
+    font-weight: 500;
+}
+
+.ghs-label-tag--green {
+    background: var(--ghs-success-bg);
+}
+
+.ghs-label-tag--gold {
+    background: var(--ghs-warning-bg);
+}
+
+.ghs-label-tag--red {
+    background: var(--ghs-danger-bg);
+}
+
+.ghs-label-tag--blue {
+    background: var(--ghs-info-bg);
+}
+
+.ghs-alert {
+    padding: .75rem 1rem;
+    border-top-width: 1px;
+    border-left: 4px solid var(--ghs-info);
+    border-radius: var(--ghs-radius);
+    box-shadow: none;
+}
+
+.ghs-alert--warning {
+    border-left-color: var(--ghs-warning);
+    border-top-color: var(--ghs-border);
+}
+
+.ghs-alert--danger {
+    border-left-color: var(--ghs-danger);
+    border-top-color: var(--ghs-border);
+}
+
+.ghs-alert--success {
+    border-left-color: var(--ghs-success);
+    border-top-color: var(--ghs-border);
+}
+
+/* Log and empty state ----------------------------------------------- */
+.ghs-log {
+    border-color: var(--ghs-border);
+    border-radius: var(--ghs-radius);
+    background: var(--ghs-surface-alt);
+    font-size: .8125rem;
+    line-height: 1.5;
+}
+
+.ghs-empty {
+    padding: 3rem 1rem;
+}
+
+.ghs-empty__title {
+    font-size: 1.125rem;
+}
+
+/* Responsive dimensions are based on the iframe width, not the shell. */
+@media (max-width: 652px) {
+    .ghs-page-section {
+        padding: 1rem;
+    }
+
+    .ghs-card__header {
+        align-items: flex-start;
+    }
+
+    .ghs-card__actions {
+        width: 100%;
+    }
+
+    .ghs-card__actions .ghs-btn {
+        flex: 0 0 auto;
+    }
+}
+
+@media (max-width: 428px) {
+    .ghs-page-section {
+        padding-inline: .75rem;
+    }
+
+    .ghs-tabs {
+        padding-inline: .25rem;
+    }
+
+    .ghs-tab {
+        padding-inline: .625rem;
+    }
+
+    .ghs-card__header,
+    .ghs-card__body,
+    .ghs-tab-panel {
+        padding-inline: .75rem;
+    }
+
+    .ghs-table-wrap {
+        margin-inline: -.75rem;
+    }
+}
