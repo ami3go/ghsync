@@ -59,7 +59,7 @@ install -Dm755 "$SRC/bin/ghsync-thirdparty" "$PKG_DIR/ghsync-thirdparty"
 for f in manifest.json index.html ghsync.css ghsync.js thirdparty.js repo-features.json; do
     install -Dm644 "$SRC/cockpit/$f" "$PKG_DIR/$f"
 done
-for src_file in "$SRC"/cockpit/repo-feature-*.js; do
+for src_file in "$SRC"/cockpit/repo-feature-*.js "$SRC"/cockpit/repo-feature-*.css; do
     [[ -f "$src_file" ]] || continue
     install -Dm644 "$src_file" "$PKG_DIR/$(basename "$src_file")"
 done
