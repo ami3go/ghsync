@@ -186,7 +186,7 @@ jobs:
 
           rm -rf /tmp/fixture/vendor/widget
           PATH="/tmp/fakebin:$PATH" "$HOME/.local/bin/ghsync" clone --porcelain | tee /tmp/reclone
-          grep -q '^cloned\tvendor/widget\t' /tmp/reclone
+          grep -q $'^cloned\tvendor/widget\t' /tmp/reclone
           test -d /tmp/fixture/vendor/widget/.git
 
           "$HOME/.local/bin/ghsync-thirdparty" remove vendor/widget --porcelain | tee /tmp/third-remove
