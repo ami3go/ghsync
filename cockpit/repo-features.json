@@ -18,5 +18,6 @@
   "repo-feature-notifications.js",
   "repo-feature-backup.js",
   "repo-feature-maintenance.js",
+  "repo-feature-row-actions-popover.js",
   "repo-feature-thirdparty-menu.js"
 ]

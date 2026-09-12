@@ -25,7 +25,7 @@ jobs:
       - name: JavaScript syntax
         run: |
           set -e
-          for f in cockpit/*.js; do
+          for f in cockpit/*.js test/*.js; do
             node --check "$f"
           done
 
@@ -72,10 +72,11 @@ jobs:
           grep -q 'third_party_repos' bin/ghsync
           grep -q 'managed_repos' bin/ghsync
 
-      - name: Cockpit page DOM test
+      - name: Cockpit page DOM tests
         run: |
           npm install --no-save jsdom
           node test/ui-test.js
+          node test/row-actions-test.js
 
   install:
     name: Install smoke test

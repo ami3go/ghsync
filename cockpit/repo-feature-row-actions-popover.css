@@ -1,0 +1,87 @@
+.ghs-table__action {
+    white-space: nowrap !important;
+}
+
+.ghs-row-actions {
+    position: relative;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .375rem;
+    flex-wrap: nowrap !important;
+    white-space: nowrap !important;
+    vertical-align: middle;
+}
+
+.ghs-row-actions > .ghs-btn {
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+}
+
+/*
+ * The menu is anchored to the row controls instead of appended as a normal
+ * body child. This avoids Cockpit CSP issues with inline positioning and keeps
+ * the menu beside the repository that opened it even in very long tables.
+ */
+.ghs-context-overlay {
+    position: absolute !important;
+    right: 0;
+    top: calc(100% + .25rem);
+    z-index: 2147483000 !important;
+    min-width: 13rem;
+    max-width: min(22rem, calc(100vw - 16px));
+    max-height: min(28rem, calc(100vh - 16px));
+    overflow: auto;
+    background: var(--ghs-surface, #fff);
+    color: var(--ghs-text, #151515);
+    border: 1px solid var(--ghs-border, #d2d2d2);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
+    padding: .25rem;
+    text-align: left;
+}
+
+.ghs-context-overlay--up {
+    top: auto;
+    bottom: calc(100% + .25rem);
+}
+
+.ghs-context-overlay--align-left {
+    right: auto;
+    left: 0;
+}
+
+.ghs-context-overlay button {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    padding: .45rem .65rem;
+    cursor: pointer;
+    font: inherit;
+}
+
+.ghs-context-overlay button:hover:not(:disabled),
+.ghs-context-overlay button:focus-visible:not(:disabled) {
+    background: var(--ghs-surface-alt, #f5f5f5);
+    outline: none;
+}
+
+.ghs-context-overlay button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.ghs-context-overlay .ghs-action-menu__sep {
+    height: 1px;
+    background: var(--ghs-border, #d2d2d2);
+    margin: .25rem 0;
+}
+
+/* The table wrapper normally scrolls horizontally and therefore clips
+ * descendants. Disable that clipping only while a row menu is open. */
+.ghs-table-wrap--menu-open {
+    overflow: visible !important;
+}
