@@ -62,10 +62,10 @@ commit.click();
 assert(commitRuns === 1, "menu action runs");
 assert(!doc.querySelector(".ghs-context-overlay"), "menu closes after selecting an action");
 
-/* Re-open and ensure an outside interaction closes it. */
+/* Re-open and ensure an outside pointer interaction closes it. */
 pointerDown(kebab);
 assert(!!doc.querySelector(".ghs-context-overlay"), "menu reopens");
-doc.body.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0 }));
+pointerDown(doc.body);
 assert(!doc.querySelector(".ghs-context-overlay"), "outside interaction closes the menu");
 
 /* Simulate the repository manager rebuilding the action cell while leaving stale dataset state. */
