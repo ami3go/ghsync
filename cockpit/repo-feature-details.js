@@ -24,7 +24,7 @@
         var cover = document.createElement("div"), box = document.createElement("div"), close = document.createElement("button");
         cover.id = "ghs-repo-modal";
         cover.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:1rem";
-        box.style.cssText = "background:#fff;max-width:48rem;width:100%;max-height:85vh;overflow:auto;border-radius:4px;padding:1.25rem;box-shadow:0 10px 30px rgba(0,0,0,.3)";
+        box.style.cssText = "background:var(--ghs-surface);color:var(--ghs-text);border:1px solid var(--ghs-border);max-width:48rem;width:100%;max-height:85vh;overflow:auto;border-radius:var(--ghs-radius);padding:1.25rem;box-shadow:var(--ghs-shadow-menu,0 10px 30px rgba(0,0,0,.3))";
         var h = document.createElement("h2"); h.textContent = title; h.style.marginTop = "0"; box.appendChild(h);
         var dl = document.createElement("dl"); dl.className = "ghs-dl";
         fields.forEach(function (f) {
