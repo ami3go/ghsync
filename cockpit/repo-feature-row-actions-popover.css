@@ -1,3 +1,5 @@
+@import url("repo-feature-cockpit-native.css");
+
 .ghs-table__action {
     white-space: nowrap !important;
 }
@@ -18,6 +20,20 @@
     flex: 0 0 auto !important;
 }
 
+.ghs-row-actions .ghs-kebab {
+    min-width: 2rem;
+    padding-inline: .5rem;
+    border-color: transparent;
+    color: var(--ghs-text-secondary);
+}
+
+.ghs-row-actions .ghs-kebab:hover:not(:disabled),
+.ghs-row-actions .ghs-kebab[aria-expanded="true"] {
+    border-color: var(--ghs-border);
+    background: var(--ghs-surface-alt);
+    color: var(--ghs-text);
+}
+
 /*
  * The menu is anchored to the row controls instead of appended as a normal
  * body child. This avoids Cockpit CSP issues with inline positioning and keeps
@@ -28,16 +44,16 @@
     right: 0;
     top: calc(100% + .25rem);
     z-index: 2147483000 !important;
-    min-width: 13rem;
+    min-width: 12rem;
     max-width: min(22rem, calc(100vw - 16px));
     max-height: min(28rem, calc(100vh - 16px));
     overflow: auto;
     background: var(--ghs-surface, #fff);
     color: var(--ghs-text, #151515);
     border: 1px solid var(--ghs-border, #d2d2d2);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
-    padding: .25rem;
+    border-radius: var(--ghs-radius, 3px);
+    box-shadow: var(--ghs-shadow-menu, 0 4px 10px rgba(3, 3, 3, .18));
+    padding: .25rem 0;
     text-align: left;
 }
 
@@ -52,15 +68,19 @@
 }
 
 .ghs-context-overlay button {
-    display: block;
+    display: flex;
+    align-items: center;
     width: 100%;
+    min-height: 2.25rem;
     border: 0;
+    border-radius: 0;
     background: transparent;
     color: inherit;
     text-align: left;
-    padding: .45rem .65rem;
+    padding: .45rem .75rem;
     cursor: pointer;
     font: inherit;
+    font-size: .875rem;
 }
 
 .ghs-context-overlay button:hover:not(:disabled),
@@ -69,14 +89,19 @@
     outline: none;
 }
 
+.ghs-context-overlay button:focus-visible:not(:disabled) {
+    box-shadow: inset 3px 0 0 var(--ghs-primary);
+}
+
 .ghs-context-overlay button:disabled {
-    opacity: .5;
+    color: var(--ghs-text-disabled);
+    opacity: 1;
     cursor: not-allowed;
 }
 
 .ghs-context-overlay .ghs-action-menu__sep {
     height: 1px;
-    background: var(--ghs-border, #d2d2d2);
+    background: var(--ghs-border-subtle, #e7e7e7);
     margin: .25rem 0;
 }
 
