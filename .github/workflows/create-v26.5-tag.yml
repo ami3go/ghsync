@@ -1,4 +1,4 @@
-name: Create v26.5 tag
+name: Publish v26.5 release
 
 on:
   push:
@@ -9,17 +9,27 @@ permissions:
   contents: write
 
 jobs:
-  tag:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Create v26.5 tag
+      - name: Publish v26.5 release
         env:
-          TARGET_SHA: ad2d4a704de9b09cf8222f0a532e0c1705835b3d
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag v26.5 "$TARGET_SHA"
-          git push origin refs/tags/v26.5
+          if gh release view v26.5 >/dev/null 2>&1; then
+            echo "v26.5 release already exists"
+            exit 0
+          fi
+          cat > release-notes.md <<'EOF'
+          Known-good GitHub Sync baseline with the repository action UI restored.
+
+          Highlights:
+          - Pull remains visible on repository rows.
+          - Secondary repository actions use the working three-dot menu.
+          - Third-party repository actions retain the corresponding Pull/Clone and menu behavior.
+          - This release is the baseline for subsequent styling and feature work.
+
+          Tag commit: ad2d4a704de9b09cf8222f0a532e0c1705835b3d
+          EOF
+          gh release create v26.5 --title "v26.5" --notes-file release-notes.md
