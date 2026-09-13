@@ -1,3 +1,5 @@
+@import url("repo-feature-cockpit-native.css");
+
 .ghs-table__action {
     white-space: nowrap !important;
 }
