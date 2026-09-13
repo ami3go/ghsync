@@ -9,7 +9,7 @@
         var cover = document.createElement("div"), box = document.createElement("div"), title = document.createElement("h2"), pre = document.createElement("pre"), close = document.createElement("button");
         cover.id = "ghs-history-modal";
         cover.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:1rem";
-        box.style.cssText = "background:#fff;max-width:64rem;width:100%;max-height:85vh;overflow:auto;border-radius:4px;padding:1.25rem;box-shadow:0 10px 30px rgba(0,0,0,.3)";
+        box.style.cssText = "background:var(--ghs-surface);color:var(--ghs-text);border:1px solid var(--ghs-border);max-width:64rem;width:100%;max-height:85vh;overflow:auto;border-radius:var(--ghs-radius);padding:1.25rem;box-shadow:var(--ghs-shadow-menu,0 10px 30px rgba(0,0,0,.3))";
         title.textContent = "Recent commits — " + name; title.style.marginTop = "0";
         pre.className = "ghs-log"; pre.style.maxHeight = "28rem"; pre.textContent = text || "No commits.";
         close.className = "ghs-btn ghs-btn--primary"; close.type = "button"; close.textContent = "Close"; close.onclick = function () { cover.remove(); };
