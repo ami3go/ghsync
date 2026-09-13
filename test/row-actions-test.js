@@ -31,9 +31,40 @@ function assert(cond, msg) {
     if (!cond) process.exitCode = 1;
 }
 
+function readCockpit(name) {
+    return fs.readFileSync(path.join(DIR, name), "utf8");
+}
+
+console.log("\n--- theme safety ---");
+fs.readdirSync(DIR).filter((name) => name.endsWith(".js")).forEach((name) => {
+    const source = readCockpit(name);
+    const hardCodedWhiteBackground = /background\s*:\s*(?:#fff(?:fff)?|white)\b/i.test(source);
+    assert(!hardCodedWhiteBackground, `${name} avoids hard-coded white backgrounds`);
+});
+
+["repo-feature-details.js", "repo-feature-history.js"].forEach((name) => {
+    const source = readCockpit(name);
+    assert(source.includes("background:var(--ghs-surface)"), `${name} uses the themed surface token`);
+    assert(source.includes("color:var(--ghs-text)"), `${name} uses the themed text token`);
+    assert(source.includes("border:1px solid var(--ghs-border)"), `${name} uses the themed border token`);
+});
+
+const legacyMenuSource = readCockpit("thirdparty.js");
+assert(legacyMenuSource.includes("background:var(--ghs-surface,#fff)"), "legacy repository menu uses the themed surface token");
+assert(legacyMenuSource.includes("color:var(--ghs-text,#151515)"), "legacy repository menu uses the themed text token");
+assert(legacyMenuSource.includes("background:var(--ghs-surface-alt,#f5f5f5)"), "legacy repository menu hover follows the themed alternate surface");
+
+const popoverCss = readCockpit("repo-feature-row-actions-popover.css");
+assert(/\.ghs-context-overlay\s*\{[\s\S]*?background:\s*var\(--ghs-surface/.test(popoverCss),
+       "repository popover uses the themed surface token");
+assert(/\.ghs-context-overlay\s*\{[\s\S]*?color:\s*var\(--ghs-text/.test(popoverCss),
+       "repository popover uses the themed text token");
+assert(/\.ghs-context-overlay button:hover[\s\S]*?background:\s*var\(--ghs-surface-alt/.test(popoverCss),
+       "repository popover hover follows the themed alternate surface");
+
 function loadFeature() {
     const script = doc.createElement("script");
-    script.textContent = fs.readFileSync(path.join(DIR, "repo-feature-row-actions-popover.js"), "utf8");
+    script.textContent = readCockpit("repo-feature-row-actions-popover.js");
     doc.body.appendChild(script);
 }
 
