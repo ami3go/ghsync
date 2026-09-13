@@ -1,0 +1,25 @@
+name: Create v26.5 tag
+
+on:
+  push:
+    branches:
+      - chore/create-v26.5-tag
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create v26.5 tag
+        env:
+          TARGET_SHA: ad2d4a704de9b09cf8222f0a532e0c1705835b3d
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag v26.5 "$TARGET_SHA"
+          git push origin refs/tags/v26.5
