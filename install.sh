@@ -27,6 +27,7 @@ if [[ "$SYSTEM" == true ]]; then
     PREFIX="${PREFIX:-/usr/local}"
     BIN="$DESTDIR$PREFIX/bin/ghsync"
     THIRD_BIN="$DESTDIR$PREFIX/bin/ghsync-thirdparty"
+    MAINT_BIN="$DESTDIR$PREFIX/bin/ghsync-maintenance"
     PKG_DIR="$DESTDIR/usr/share/cockpit/ghsync"
     METAINFO="$DESTDIR/usr/share/metainfo/$METAINFO_NAME"
     if [[ $EUID -ne 0 && -z "$DESTDIR" ]]; then
@@ -37,31 +38,36 @@ else
     DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
     BIN="$HOME/.local/bin/ghsync"
     THIRD_BIN="$HOME/.local/bin/ghsync-thirdparty"
+    MAINT_BIN="$HOME/.local/bin/ghsync-maintenance"
     PKG_DIR="$DATA_HOME/cockpit/ghsync"
     METAINFO="$DATA_HOME/metainfo/$METAINFO_NAME"
 fi
 
 if [[ "$UNINSTALL" == true ]]; then
     rm -rf "$PKG_DIR"
-    rm -f "$BIN" "$THIRD_BIN" "$METAINFO"
+    rm -f "$BIN" "$THIRD_BIN" "$MAINT_BIN" "$METAINFO"
     echo "Removed $PKG_DIR"
     echo "Removed $BIN"
     echo "Removed $THIRD_BIN"
+    echo "Removed $MAINT_BIN"
     echo "Removed $METAINFO"
     echo
     echo "Your repositories, config and log were left alone."
-    echo "To drop the scheduled job as well, run 'ghsync cron remove' before uninstalling."
+    echo "To drop scheduled jobs as well, remove the ghsync timers before uninstalling."
     exit 0
 fi
 
 [[ -f "$SRC/bin/ghsync" ]] || { echo "bin/ghsync missing — run this from the repository root." >&2; exit 1; }
 [[ -f "$SRC/bin/ghsync-thirdparty" ]] || { echo "bin/ghsync-thirdparty missing — run this from the repository root." >&2; exit 1; }
+[[ -f "$SRC/bin/ghsync-maintenance" ]] || { echo "bin/ghsync-maintenance missing — run this from the repository root." >&2; exit 1; }
 [[ -f "$SRC/packaging/$METAINFO_NAME" ]] || { echo "packaging/$METAINFO_NAME missing — run this from the repository root." >&2; exit 1; }
 
 install -Dm755 "$SRC/bin/ghsync" "$BIN"
 install -Dm755 "$SRC/bin/ghsync-thirdparty" "$THIRD_BIN"
+install -Dm755 "$SRC/bin/ghsync-maintenance" "$MAINT_BIN"
 install -Dm755 "$SRC/bin/ghsync" "$PKG_DIR/ghsync"
 install -Dm755 "$SRC/bin/ghsync-thirdparty" "$PKG_DIR/ghsync-thirdparty"
+install -Dm755 "$SRC/bin/ghsync-maintenance" "$PKG_DIR/ghsync-maintenance"
 for f in manifest.json index.html ghsync.css ghsync.js thirdparty.js repo-features.json; do
     install -Dm644 "$SRC/cockpit/$f" "$PKG_DIR/$f"
 done
@@ -74,6 +80,7 @@ install -Dm644 "$SRC/packaging/$METAINFO_NAME" "$METAINFO"
 echo "Installed:"
 echo "  command      $BIN"
 echo "  helper       $THIRD_BIN"
+echo "  maintenance  $MAINT_BIN"
 echo "  cockpit page $PKG_DIR"
 echo "  app metadata $METAINFO"
 echo

@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# ghsync-maintenance — safe repository maintenance for ghsync-managed local clones.
+set -uo pipefail
+
+PORCELAIN=false
+QUIET=false
+SUBMODULES=false
+TARGET=""
+for arg in "$@"; do
+    case "$arg" in
+        --porcelain) PORCELAIN=true ;;
+        -q|--quiet) QUIET=true ;;
+        --submodules) SUBMODULES=true ;;
+        -h|--help)
+            echo "Usage: ghsync-maintenance [OWNER/REPO] [--submodules] [--porcelain] [--quiet]"; exit 0 ;;
+        -*) echo "unknown option: $arg" >&2; exit 1 ;;
+        *) TARGET="$arg" ;;
+    esac
+done
+
+find_core() {
+    local p
+    for p in "$HOME/.local/bin/ghsync" /usr/local/bin/ghsync /usr/bin/ghsync "$(dirname "$0")/ghsync"; do
+        if [[ -x "$p" ]]; then
+            printf '%s\n' "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+CORE=$(find_core) || { echo "ghsync not found" >&2; exit 1; }
+CHECK=$("$CORE" check --porcelain 2>/dev/null) || { echo "could not read ghsync configuration" >&2; exit 1; }
+ROOT=$(awk -F'\t' '$1=="check" && $2=="root" {print $3; exit}' <<<"$CHECK")
+[[ -n "$ROOT" ]] || { echo "repository root is unknown" >&2; exit 1; }
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/ghsync
+mkdir -p "$STATE"
+LOG="$STATE/maintenance.log"
+LOCK="$STATE/maintenance.lock"
+exec 9>"$LOCK"
+if command -v flock >/dev/null && ! flock -n 9; then
+    echo "maintenance is already running" >&2
+    exit 1
+fi
+
+report() {
+    local tag="$1" repo="$2" detail="${3:-}"
+    printf '%s\t%s\t%s\n' "$tag" "$repo" "$detail" >>"$LOG"
+    if [[ "$PORCELAIN" == true ]]; then
+        printf '%s\t%s\t%s\n' "$tag" "$repo" "$detail"
+    elif [[ "$QUIET" != true ]]; then
+        printf '%-12s %-42s %s\n' "$tag" "$repo" "$detail"
+    fi
+}
+repo_path() {
+    local name="$1"
+    if [[ -e "$ROOT/$name/.git" ]]; then
+        printf '%s\n' "$ROOT/$name"
+    elif [[ -d "$ROOT/$name.git" ]]; then
+        printf '%s\n' "$ROOT/$name.git"
+    fi
+}
+local_repos() {
+    if [[ -n "$TARGET" ]]; then
+        printf '%s\n' "$TARGET"
+        return
+    fi
+    [[ -d "$ROOT" ]] || return 0
+    {
+        find "$ROOT" -mindepth 2 -maxdepth 3 -name .git -printf '%h\n' 2>/dev/null
+        find "$ROOT" -mindepth 2 -maxdepth 2 -type d -name '*.git' -printf '%p\n' 2>/dev/null | sed 's|\.git$||'
+    } | sed "s|^$ROOT/||" | sort -u
+}
+
+failures=0
+while IFS= read -r repo; do
+    [[ -n "$repo" ]] || continue
+    dir=$(repo_path "$repo")
+    if [[ -z "$dir" ]]; then
+        report skipped "$repo" "not found"
+        continue
+    fi
+    if git -C "$dir" rev-parse --is-bare-repository 2>/dev/null | grep -qx true; then
+        if git -C "$dir" remote update --prune >/dev/null 2>&1 \
+            && git -C "$dir" gc --auto >/dev/null 2>&1 \
+            && git -C "$dir" fsck --connectivity-only >/dev/null 2>&1; then
+            report maintained "$repo" "mirror: remote update, gc --auto, fsck"
+        else
+            report failed "$repo" "mirror maintenance failed"
+            failures=$((failures + 1))
+        fi
+        continue
+    fi
+    detail=""
+    if ! git -C "$dir" fetch --all --prune --tags >/dev/null 2>&1; then
+        report failed "$repo" "fetch --prune failed"
+        failures=$((failures + 1))
+        continue
+    fi
+    if ! git -C "$dir" gc --auto >/dev/null 2>&1; then
+        report failed "$repo" "git gc --auto failed"
+        failures=$((failures + 1))
+        continue
+    fi
+    if ! git -C "$dir" fsck --connectivity-only >/dev/null 2>&1; then
+        report failed "$repo" "git fsck failed"
+        failures=$((failures + 1))
+        continue
+    fi
+    gone=$(git -C "$dir" for-each-ref --format='%(refname:short)%09%(upstream:track)' refs/heads 2>/dev/null | awk -F'\t' '$2 ~ /gone/ {print $1}' | paste -sd, -)
+    if [[ -n "$gone" ]]; then detail="stale upstream: $gone"; fi
+    if [[ "$SUBMODULES" == true && -f "$dir/.gitmodules" ]]; then
+        if git -C "$dir" submodule update --init --recursive >/dev/null 2>&1; then
+            detail="${detail:+$detail; }submodules refreshed"
+        else
+            report failed "$repo" "submodule update failed"
+            failures=$((failures + 1))
+            continue
+        fi
+    fi
+    report maintained "$repo" "${detail:-fetch --prune, gc --auto, fsck OK}"
+done < <(local_repos)
+
+if (( failures > 0 )); then
+    if command -v systemd-cat >/dev/null; then
+        echo "ghsync maintenance: $failures repository failure(s)" | systemd-cat -t ghsync-maintenance -p err
+    fi
+    exit 1
+fi
+exit 0
