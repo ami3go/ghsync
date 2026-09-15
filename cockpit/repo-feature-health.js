@@ -6,7 +6,6 @@
 
     function $(id) { return document.getElementById(id); }
     function resize() { try { cockpit.transport.control("size-change"); } catch (e) { /* standalone */ } }
-    function safe(promise, fallback) { return Promise.resolve(promise).catch(function () { return fallback; }); }
     function message(error) { return error && error.message ? error.message : String(error || "Unknown error"); }
 
     var tab = null, panel = null, scanning = false, lastRows = [], byName = Object.create(null);
@@ -20,17 +19,13 @@
         return values;
     }
 
-    function historyTime(text, fallback) {
-        var value = Date.parse(String(text || "").replace(" ", "T"));
-        return isNaN(value) ? fallback : value;
-    }
-
     function parseHistory(text) {
         var history = { success: Object.create(null), failure: Object.create(null) };
         String(text || "").split(/\r?\n/).forEach(function (line, index) {
             var match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(updated|up-to-date|cloned|failed)\s+([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)(?:\s+—\s+(.*))?\s*$/);
             if (!match) return;
-            var item = { at: match[1], time: historyTime(match[1], index), tag: match[2], detail: match[4] || "" };
+            var parsed = Date.parse(match[1].replace(" ", "T"));
+            var item = { at: match[1], time: isNaN(parsed) ? index : parsed, tag: match[2], detail: match[4] || "" };
             if (match[2] === "failed") history.failure[match[3]] = item;
             else history.success[match[3]] = item;
         });
@@ -40,46 +35,44 @@
     function readHistory() {
         return m.runCore(["check"]).then(function (out) {
             var log = parseCheck(out).log;
-            if (!log) return { success: Object.create(null), failure: Object.create(null) };
+            if (!log) return parseHistory("");
             return cockpit.spawn(["tail", "-n", "3000", log], { err: "ignore", superuser: null })
-                .then(parseHistory, function () { return { success: Object.create(null), failure: Object.create(null) }; });
-        }, function () { return { success: Object.create(null), failure: Object.create(null) }; });
+                .then(parseHistory, function () { return parseHistory(""); });
+        }, function () { return parseHistory(""); });
     }
 
     function formatSize(kb) {
         if (kb === null || kb === undefined || isNaN(kb)) return "Unknown";
-        var bytes = Number(kb) * 1024, units = ["B", "KiB", "MiB", "GiB", "TiB"], index = 0;
-        while (bytes >= 1024 && index < units.length - 1) { bytes /= 1024; index += 1; }
-        var digits = index >= 3 ? 1 : (index >= 2 ? 0 : 0);
-        return bytes.toFixed(digits) + " " + units[index];
+        var value = Number(kb) * 1024, units = ["B", "KiB", "MiB", "GiB", "TiB"], index = 0;
+        while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
+        return value.toFixed(index >= 3 ? 1 : 0) + " " + units[index];
     }
 
     function relativeTime(value) {
         if (!value) return "Never recorded";
-        var d = new Date(String(value).replace(" ", "T"));
-        if (isNaN(d.getTime())) return value;
-        var delta = Date.now() - d.getTime(), future = delta < 0;
+        var date = new Date(String(value).replace(" ", "T"));
+        if (isNaN(date.getTime())) return value;
+        var delta = Date.now() - date.getTime(), future = delta < 0;
         delta = Math.abs(delta);
         var amount, unit;
         if (delta < 60000) { amount = Math.max(1, Math.round(delta / 1000)); unit = "second"; }
         else if (delta < 3600000) { amount = Math.round(delta / 60000); unit = "minute"; }
         else if (delta < 86400000) { amount = Math.round(delta / 3600000); unit = "hour"; }
         else { amount = Math.round(delta / 86400000); unit = "day"; }
-        return future ? "in " + amount + " " + unit + (amount === 1 ? "" : "s") : amount + " " + unit + (amount === 1 ? "" : "s") + " ago";
+        return (future ? "in " : "") + amount + " " + unit + (amount === 1 ? "" : "s") + (future ? "" : " ago");
     }
 
     function repoMeta(row) {
         var mirror = row.branch === "mirror", detached = row.branch === "detached";
-        var upstream = mirror ? Promise.resolve(true) : (detached ? Promise.resolve(false) :
-            m.runGit(row.name, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).then(function () { return true; }, function () { return false; }));
+        var upstream = mirror ? Promise.resolve(true) : detached ? Promise.resolve(false) :
+            m.runGit(row.name, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).then(function () { return true; }, function () { return false; });
         var integrity = m.runGit(row.name, ["fsck", "--connectivity-only", "--no-dangling"])
             .then(function () { return { ok: true, detail: "" }; }, function (e) { return { ok: false, detail: message(e).split("\n")[0] }; });
         var size = m.repoDirectory(row.name).then(function (dir) {
-            return cockpit.spawn(["du", "-sk", dir], { err: "ignore", superuser: null })
-                .then(function (out) {
-                    var value = parseInt(String(out || "").trim().split(/\s+/)[0], 10);
-                    return isNaN(value) ? null : value;
-                }, function () { return null; });
+            return cockpit.spawn(["du", "-sk", dir], { err: "ignore", superuser: null }).then(function (out) {
+                var number = parseInt(String(out || "").trim().split(/\s+/)[0], 10);
+                return isNaN(number) ? null : number;
+            }, function () { return null; });
         }, function () { return null; });
         return Promise.all([upstream, integrity, size]).then(function (values) {
             return { detached: detached, upstream: values[0], integrity: values[1], sizeKb: values[2] };
@@ -105,8 +98,7 @@
             if (row.behind > 0) signals.push(signal("behind", "warning", "Behind upstream", row.behind + " commit" + (row.behind === 1 ? "" : "s") + " behind."));
             if (row.ahead > 0) signals.push(signal("ahead", "warning", "Local commits not pushed", row.ahead + " commit" + (row.ahead === 1 ? "" : "s") + " ahead."));
         }
-        if (row.dirty > 0)
-            signals.push(signal("dirty", "warning", "Uncommitted changes", row.dirty + " changed path" + (row.dirty === 1 ? "" : "s") + "."));
+        if (row.dirty > 0) signals.push(signal("dirty", "warning", "Uncommitted changes", row.dirty + " changed path" + (row.dirty === 1 ? "" : "s") + "."));
         if (row.branch !== "mirror" && !meta.detached && !meta.upstream)
             signals.push(signal("no-upstream", "warning", "No upstream branch", "The current branch has no tracking branch."));
         return {
@@ -114,8 +106,7 @@
             row: row,
             meta: meta,
             signals: signals,
-            state: signals.some(function (item) { return item.severity === "danger"; }) ? "problem" :
-                (signals.length ? "attention" : "healthy"),
+            state: signals.some(function (item) { return item.severity === "danger"; }) ? "problem" : (signals.length ? "attention" : "healthy"),
             lastSuccess: success,
             lastFailure: failure,
             sizeKb: meta.sizeKb
@@ -131,11 +122,9 @@
         return out;
     }
 
-    function stateLabel(state) {
-        return state === "problem" ? "Problem" : (state === "attention" ? "Attention" : "Healthy");
-    }
+    function stateLabel(state) { return state === "problem" ? "Problem" : (state === "attention" ? "Attention" : "Healthy"); }
 
-    function overview() {
+    function ensureOverview() {
         var dl = document.querySelector(".ghs-card .ghs-dl");
         if (!dl || $("health-overview-group")) return;
         var group = document.createElement("div");
@@ -147,12 +136,13 @@
     }
 
     function updateOverview() {
-        overview();
+        ensureOverview();
         var el = $("v-health"); if (!el) return;
         if (scanning && !lastRows.length) { el.textContent = "Checking…"; return; }
         var counts = summary(lastRows);
-        el.textContent = counts.healthy + " healthy • " + counts.attention + " attention • " + counts.problem + " problem" +
-            (counts.measured ? " • " + formatSize(counts.sizeKb) + " on disk" : "");
+        var text = counts.healthy + " healthy • " + counts.attention + " attention • " + counts.problem + " problem";
+        if (counts.measured) text += " • " + formatSize(counts.sizeKb) + " on disk";
+        if (el.textContent !== text) el.textContent = text;
         el.className = "ghs-dl__desc" + (counts.problem ? " ghs-t-red" : "");
     }
 
@@ -174,9 +164,12 @@
                 badge.className = "ghs-health-inline";
                 stateCell.appendChild(badge);
             }
-            badge.className = "ghs-health-inline ghs-health-inline--" + entry.state;
-            badge.textContent = stateLabel(entry.state);
-            badge.title = entry.signals.length ? entry.signals.map(function (item) { return item.title; }).join(", ") : "No health problems detected";
+            var className = "ghs-health-inline ghs-health-inline--" + entry.state;
+            var text = stateLabel(entry.state);
+            var title = entry.signals.length ? entry.signals.map(function (item) { return item.title; }).join(", ") : "No health problems detected";
+            if (badge.className !== className) badge.className = className;
+            if (badge.textContent !== text) badge.textContent = text;
+            if (badge.title !== title) badge.title = title;
         });
     }
 
@@ -185,16 +178,15 @@
         if (!body || !wrap || !empty) return;
         body.textContent = "";
         var filter = ($("health-filter") ? $("health-filter").value : "").trim().toLowerCase();
-        var state = $("health-state-filter") ? $("health-state-filter").value : "";
+        var selectedState = $("health-state-filter") ? $("health-state-filter").value : "";
         var visible = lastRows.filter(function (entry) {
-            if (state && entry.state !== state) return false;
+            if (selectedState && entry.state !== selectedState) return false;
             if (!filter) return true;
             var text = entry.name + " " + entry.signals.map(function (item) { return item.title + " " + item.detail; }).join(" ");
             return text.toLowerCase().indexOf(filter) >= 0;
         });
         visible.forEach(function (entry) {
-            var tr = document.createElement("tr");
-            tr.className = "ghs-health-row ghs-health-row--" + entry.state;
+            var tr = document.createElement("tr"); tr.className = "ghs-health-row ghs-health-row--" + entry.state;
             var repo = document.createElement("td"), health = document.createElement("td"), signals = document.createElement("td"), synced = document.createElement("td"), size = document.createElement("td"), integrity = document.createElement("td");
             repo.className = "ghs-repo-name"; repo.textContent = entry.name;
             var badge = document.createElement("span"); badge.className = "ghs-health-state ghs-health-state--" + entry.state; badge.textContent = stateLabel(entry.state); health.appendChild(badge);
@@ -216,7 +208,7 @@
         });
         wrap.classList.toggle("ghs-hidden", visible.length === 0);
         empty.classList.toggle("ghs-hidden", visible.length !== 0 || lastRows.length !== 0);
-        if ($("health-no-match")) $("health-no-match").classList.toggle("ghs-hidden", visible.length !== 0 || lastRows.length === 0 || (!filter && !state));
+        if ($("health-no-match")) $("health-no-match").classList.toggle("ghs-hidden", visible.length !== 0 || lastRows.length === 0 || (!filter && !selectedState));
         var counts = summary(lastRows);
         if ($("health-summary")) $("health-summary").textContent = counts.total + " repositories • " + counts.healthy + " healthy • " + counts.attention + " attention • " + counts.problem + " problem";
         if ($("health-disk")) $("health-disk").textContent = counts.measured ? formatSize(counts.sizeKb) + " measured" : "Disk usage unavailable";
@@ -243,18 +235,15 @@
             m.statusSnapshot().catch(function (e) { return /no matching local clones/i.test(message(e)) ? [] : Promise.reject(e); }),
             readHistory()
         ]).then(function (values) {
-            var rows = values[0], history = values[1];
-            return m.mapLimit(rows, 4, function (row) {
-                return repoMeta(row).then(function (meta) { return assess(row, meta, history); });
+            return m.mapLimit(values[0], 4, function (row) {
+                return repoMeta(row).then(function (meta) { return assess(row, meta, values[1]); });
             });
         }).then(function (entries) {
+            var rank = { problem: 0, attention: 1, healthy: 2 };
             lastRows = entries.sort(function (a, b) {
-                var rank = { problem: 0, attention: 1, healthy: 2 };
-                if (rank[a.state] !== rank[b.state]) return rank[a.state] - rank[b.state];
-                return a.name.localeCompare(b.name);
+                return rank[a.state] !== rank[b.state] ? rank[a.state] - rank[b.state] : a.name.localeCompare(b.name);
             });
-            render();
-            return lastRows;
+            render(); return lastRows;
         }).catch(function (e) {
             if ($("health-summary")) $("health-summary").textContent = "Could not check repository health: " + message(e);
             return lastRows;
@@ -262,7 +251,7 @@
     }
 
     function createUi() {
-        overview();
+        ensureOverview();
         if (!$("ghs-health-css")) {
             var css = document.createElement("link"); css.id = "ghs-health-css"; css.rel = "stylesheet"; css.href = "repo-feature-health.css"; document.head.appendChild(css);
         }
@@ -296,7 +285,7 @@
                 panel.classList.add("ghs-hidden"); tab.classList.remove("ghs-tab--current"); tab.setAttribute("aria-selected", "false");
             }
         }).observe(tabs, { subtree: true, attributes: true, attributeFilter: ["class", "aria-selected"] });
-        $("btn-health-refresh").onclick = function () { scan(); };
+        $("btn-health-refresh").onclick = scan;
         $("health-filter").oninput = renderTable;
         $("health-state-filter").onchange = renderTable;
     }
@@ -304,7 +293,13 @@
     createUi();
     window.GHSyncHealth = { parseHistory: parseHistory, assess: assess, summary: summary, formatSize: formatSize, scan: scan };
     var repoBody = $("repos");
-    if (repoBody) new MutationObserver(function () { setTimeout(renderRepoBadges, 0); }).observe(repoBody, { childList: true, subtree: true });
+    if (repoBody) new MutationObserver(function (mutations) {
+        var external = mutations.some(function (mutation) {
+            var target = mutation.target;
+            return !(target && target.nodeType === 1 && target.closest && target.closest(".ghs-health-inline"));
+        });
+        if (external) setTimeout(renderRepoBadges, 0);
+    }).observe(repoBody, { childList: true, subtree: true });
     var refresh = $("btn-refresh");
     if (refresh) refresh.addEventListener("click", function () { setTimeout(scan, 500); });
     setTimeout(scan, 150);
