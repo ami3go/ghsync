@@ -5,7 +5,31 @@
     if (!m) return;
     var META = null, PATH = null;
 
-    function defaultMeta() { return { groups: {}, tags: {}, favorites: {}, policies: {} }; }
+    function uniq(values) {
+        var seen = Object.create(null), out = [];
+        (values || []).forEach(function (value) {
+            value = String(value || "").trim();
+            if (!value || seen[value]) return;
+            seen[value] = true; out.push(value);
+        });
+        return out;
+    }
+    function defaultMeta() { return { groups: {}, groupDefinitions: [], tags: {}, favorites: {}, policies: {} }; }
+    function normalizeMeta(value) {
+        value = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        var out = defaultMeta();
+        out.groups = value.groups && typeof value.groups === "object" && !Array.isArray(value.groups) ? value.groups : {};
+        out.tags = value.tags && typeof value.tags === "object" && !Array.isArray(value.tags) ? value.tags : {};
+        out.favorites = value.favorites && typeof value.favorites === "object" && !Array.isArray(value.favorites) ? value.favorites : {};
+        out.policies = value.policies && typeof value.policies === "object" && !Array.isArray(value.policies) ? value.policies : {};
+        out.groupDefinitions = uniq(Array.isArray(value.groupDefinitions) ? value.groupDefinitions : []);
+        Object.keys(out.groups).forEach(function (repo) {
+            var group = String(out.groups[repo] || "").trim();
+            if (group && out.groupDefinitions.indexOf(group) < 0) out.groupDefinitions.push(group);
+        });
+        out.groupDefinitions.sort();
+        return out;
+    }
     function rowName(row) {
         if (row.dataset.repoName) return row.dataset.repoName;
         var cell = row.querySelector(".ghs-repo-name"); if (!cell) return "";
@@ -27,10 +51,11 @@
     function loadMeta() {
         if (META) return Promise.resolve(META);
         return metaPath().then(function (path) { return cockpit.spawn(["cat", path], { err: "ignore" }); })
-            .then(function (text) { try { META = JSON.parse(text); } catch (e) { META = defaultMeta(); } return META; })
+            .then(function (text) { try { META = normalizeMeta(JSON.parse(text)); } catch (e) { META = defaultMeta(); } return META; })
             .catch(function () { META = defaultMeta(); return META; });
     }
     function saveMeta() {
+        META = normalizeMeta(META);
         return metaPath().then(function (path) {
             var dir = path.slice(0, path.lastIndexOf("/"));
             return cockpit.spawn(["mkdir", "-p", dir], { err: "message" })
@@ -47,12 +72,16 @@
     }
     function rebuildFilter() {
         ensureFilter(); var select = document.getElementById("repo-group-filter"); if (!select || !META) return;
-        var current = select.value, groups = {};
-        Object.keys(META.groups || {}).forEach(function (name) { if (META.groups[name]) groups[META.groups[name]] = true; });
+        var current = select.value, names = uniq(META.groupDefinitions || []);
+        Object.keys(META.groups || {}).forEach(function (repo) {
+            var group = String(META.groups[repo] || "").trim();
+            if (group && names.indexOf(group) < 0) names.push(group);
+        });
+        names.sort();
         select.textContent = "";
         var all = document.createElement("option"); all.value = ""; all.textContent = "All groups"; select.appendChild(all);
-        Object.keys(groups).sort().forEach(function (g) { var o = document.createElement("option"); o.value = g; o.textContent = g; select.appendChild(o); });
-        select.value = Object.prototype.hasOwnProperty.call(groups, current) ? current : "";
+        names.forEach(function (g) { var o = document.createElement("option"); o.value = g; o.textContent = g; select.appendChild(o); });
+        select.value = names.indexOf(current) >= 0 ? current : "";
     }
     function apply() {
         if (!META) return;
@@ -72,12 +101,19 @@
             row.style.display = selected && group !== selected ? "none" : "";
         });
     }
+    m.refreshGroups = apply;
+    m.rebuildGroupFilter = rebuildFilter;
+
     function edit(name) {
         loadMeta().then(function () {
             var group = window.prompt("Group for " + name + " (blank clears):", META.groups[name] || ""); if (group === null) return;
             var tags = window.prompt("Comma-separated tags for " + name + " (blank clears):", (META.tags[name] || []).join(", ")); if (tags === null) return;
             group = group.trim(); tags = tags.split(",").map(function (t) { return t.trim(); }).filter(Boolean);
-            if (group) META.groups[name] = group; else delete META.groups[name];
+            if (group && !/^[A-Za-z0-9._-]+$/.test(group)) throw new Error("Group names may contain letters, numbers, dot, underscore and dash only");
+            if (group) {
+                META.groups[name] = group;
+                if (META.groupDefinitions.indexOf(group) < 0) META.groupDefinitions.push(group);
+            } else delete META.groups[name];
             if (tags.length) META.tags[name] = tags; else delete META.tags[name];
             return saveMeta().then(apply);
         }).catch(function (e) { window.alert("Could not save group/tags: " + (e.message || String(e))); });
@@ -85,4 +121,9 @@
     m.registerAction({ label: "Group / tags…", run: edit });
     if (document.getElementById("repos")) new MutationObserver(function () { setTimeout(apply, 0); }).observe(document.getElementById("repos"), { childList: true });
     loadMeta().then(function () { ensureFilter(); apply(); });
+
+    window.GHSyncGroupMeta = {
+        normalize: normalizeMeta,
+        groupNames: function (meta) { return normalizeMeta(meta).groupDefinitions.slice(); }
+    };
 })();
