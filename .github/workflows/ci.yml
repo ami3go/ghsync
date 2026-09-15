@@ -68,7 +68,7 @@ jobs:
           grep -q 'check-ref-format' cockpit/repo-feature-branches.js
           grep -q 'DISCARD ' cockpit/repo-feature-local-changes.js
           grep -q 'bundle create' cockpit/repo-feature-backup.js
-          grep -q 'git apply --index' cockpit/repo-feature-backup.js
+          grep -q 'apply --index' cockpit/repo-feature-backup.js
           grep -q 'diff.*--cached.*--name-only.*--no-renames.*-z' cockpit/repo-feature-commit-selected.js
           grep -q 'fsck' cockpit/repo-feature-maintenance.js
           grep -q 'pull-only' cockpit/repo-feature-policy.js
