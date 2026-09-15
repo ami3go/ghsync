@@ -1,0 +1,14 @@
+.ghs-attention-tab{display:inline-flex;align-items:center;gap:.4rem}
+.ghs-attention-count{display:inline-flex;min-width:1.35rem;height:1.35rem;padding:0 .35rem;align-items:center;justify-content:center;border-radius:999px;background:var(--ghs-danger,#c9190b);color:#fff;font-size:.75rem;font-weight:700;line-height:1}
+.ghs-attention-toolbar{gap:.75rem;align-items:center}
+.ghs-attention-filter{width:min(22rem,100%)}
+.ghs-attention-table td{vertical-align:top}
+.ghs-attention-row--danger{box-shadow:inset 3px 0 0 var(--ghs-danger,#c9190b)}
+.ghs-attention-row--warning{box-shadow:inset 3px 0 0 var(--ghs-warning,#f0ab00)}
+.ghs-attention-state{display:inline-flex;align-items:center;border-radius:999px;padding:.2rem .5rem;font-size:.8rem;font-weight:600;white-space:nowrap}
+.ghs-attention-state--danger{background:rgba(201,25,11,.12);color:var(--ghs-danger,#c9190b)}
+.ghs-attention-state--warning{background:rgba(240,171,0,.16);color:var(--ghs-warning-text,#8a5d00)}
+.ghs-attention-problems{margin:0;padding-left:1.1rem;display:grid;gap:.3rem}
+.ghs-attention-problems span{color:var(--ghs-text-muted,#6a6e73)}
+.ghs-attention-actions{display:flex;flex-wrap:wrap;gap:.4rem;min-width:12rem}
+@media (max-width:48rem){.ghs-attention-toolbar{align-items:stretch}.ghs-attention-filter{width:100%}.ghs-attention-table th:nth-child(2),.ghs-attention-table td:nth-child(2){display:none}}
