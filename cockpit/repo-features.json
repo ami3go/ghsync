@@ -21,6 +21,7 @@
   "repo-feature-sync.js",
   "repo-feature-repository-list.js",
   "repo-feature-sync-controls.js",
+  "repo-feature-machines.js",
   "repo-feature-row-actions-popover.js",
   "repo-feature-thirdparty-menu.js"
 ]

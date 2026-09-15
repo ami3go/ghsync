@@ -1,0 +1,10 @@
+.ghs-fleet-table tbody tr{cursor:pointer}
+.ghs-fleet-table tbody tr:hover{background:var(--ghs-hover,rgba(3,102,214,.06))}
+.ghs-fleet-state{display:inline-flex;align-items:center;min-height:1.5rem;padding:.1rem .5rem;border-radius:999px;font-size:.8125rem;font-weight:600;white-space:nowrap;background:var(--ghs-surface-subtle,#f0f0f0);color:var(--ghs-text,#151515)}
+.ghs-fleet-state--healthy{background:rgba(62,134,53,.14);color:var(--ghs-green,#3e8635)}
+.ghs-fleet-state--attention,.ghs-fleet-state--outofsync,.ghs-fleet-state--stale{background:rgba(240,171,0,.16);color:var(--ghs-gold,#8a5d00)}
+.ghs-fleet-state--offline{background:rgba(201,25,11,.12);color:var(--ghs-red,#c9190b)}
+.ghs-fleet-state--unknown{background:var(--ghs-surface-subtle,#f0f0f0);color:var(--ghs-text-muted,#6a6e73)}
+.ghs-fleet-assignments{margin-top:1.5rem;border-top:1px solid var(--ghs-border,#d2d2d2);padding-top:1rem}
+.ghs-fleet-machine-label{margin:0 .75rem 0 0;white-space:nowrap}
+@media (max-width:48rem){.ghs-fleet-table{min-width:56rem}.ghs-fleet-machine-label{width:100%;margin-bottom:.5rem}}
