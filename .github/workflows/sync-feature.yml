@@ -1,4 +1,4 @@
-name: Sync feature
+name: Priority 1 Cockpit features
 
 on:
   pull_request:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  sync-ui:
-    name: Repository Sync and Fleet DOM tests
+  priority-one-ui:
+    name: Sync, Fleet and Attention DOM tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,3 +18,5 @@ jobs:
         run: node test/repository-list-feature-test.js
       - name: Test Fleet machines view
         run: node test/machines-feature-test.js
+      - name: Test Attention dashboard
+        run: node test/attention-feature-test.js
