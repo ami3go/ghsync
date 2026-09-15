@@ -11,6 +11,7 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM=false
 UNINSTALL=false
+METAINFO_NAME="io.github.ami3go.ghsync.metainfo.xml"
 
 for arg in "$@"; do
     case "$arg" in
@@ -27,22 +28,26 @@ if [[ "$SYSTEM" == true ]]; then
     BIN="$DESTDIR$PREFIX/bin/ghsync"
     THIRD_BIN="$DESTDIR$PREFIX/bin/ghsync-thirdparty"
     PKG_DIR="$DESTDIR/usr/share/cockpit/ghsync"
+    METAINFO="$DESTDIR/usr/share/metainfo/$METAINFO_NAME"
     if [[ $EUID -ne 0 && -z "$DESTDIR" ]]; then
         echo "--system needs root. Re-run with sudo." >&2
         exit 1
     fi
 else
+    DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
     BIN="$HOME/.local/bin/ghsync"
     THIRD_BIN="$HOME/.local/bin/ghsync-thirdparty"
-    PKG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cockpit/ghsync"
+    PKG_DIR="$DATA_HOME/cockpit/ghsync"
+    METAINFO="$DATA_HOME/metainfo/$METAINFO_NAME"
 fi
 
 if [[ "$UNINSTALL" == true ]]; then
     rm -rf "$PKG_DIR"
-    rm -f "$BIN" "$THIRD_BIN"
+    rm -f "$BIN" "$THIRD_BIN" "$METAINFO"
     echo "Removed $PKG_DIR"
     echo "Removed $BIN"
     echo "Removed $THIRD_BIN"
+    echo "Removed $METAINFO"
     echo
     echo "Your repositories, config and log were left alone."
     echo "To drop the scheduled job as well, run 'ghsync cron remove' before uninstalling."
@@ -51,6 +56,7 @@ fi
 
 [[ -f "$SRC/bin/ghsync" ]] || { echo "bin/ghsync missing — run this from the repository root." >&2; exit 1; }
 [[ -f "$SRC/bin/ghsync-thirdparty" ]] || { echo "bin/ghsync-thirdparty missing — run this from the repository root." >&2; exit 1; }
+[[ -f "$SRC/packaging/$METAINFO_NAME" ]] || { echo "packaging/$METAINFO_NAME missing — run this from the repository root." >&2; exit 1; }
 
 install -Dm755 "$SRC/bin/ghsync" "$BIN"
 install -Dm755 "$SRC/bin/ghsync-thirdparty" "$THIRD_BIN"
@@ -63,11 +69,13 @@ for src_file in "$SRC"/cockpit/repo-feature-*.js "$SRC"/cockpit/repo-feature-*.c
     [[ -f "$src_file" ]] || continue
     install -Dm644 "$src_file" "$PKG_DIR/$(basename "$src_file")"
 done
+install -Dm644 "$SRC/packaging/$METAINFO_NAME" "$METAINFO"
 
 echo "Installed:"
 echo "  command      $BIN"
 echo "  helper       $THIRD_BIN"
 echo "  cockpit page $PKG_DIR"
+echo "  app metadata $METAINFO"
 echo
 
 if [[ "$SYSTEM" != true ]] && ! printf '%s' ":$PATH:" | grep -q ":$HOME/.local/bin:"; then

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>io.github.ami3go.ghsync</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>GitHub Sync</name>
+  <summary>Manage and synchronize Git repositories from Cockpit</summary>
+  <description>
+    <p>
+      GitHub Sync adds a Cockpit interface for monitoring, cloning, pulling,
+      committing, and maintaining managed and third-party Git repositories.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">ghsync</launchable>
+  <url type="homepage">https://github.com/ami3go/ghsync</url>
+</component>
