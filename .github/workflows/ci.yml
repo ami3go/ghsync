@@ -17,10 +17,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: shellcheck
-        run: shellcheck bin/ghsync bin/ghsync-thirdparty install.sh
+        run: shellcheck bin/ghsync bin/ghsync-thirdparty bin/ghsync-maintenance install.sh
 
       - name: bash syntax
-        run: bash -n bin/ghsync && bash -n bin/ghsync-thirdparty && bash -n install.sh
+        run: bash -n bin/ghsync && bash -n bin/ghsync-thirdparty && bash -n bin/ghsync-maintenance && bash -n install.sh
 
       - name: JavaScript syntax
         run: |
@@ -47,6 +47,8 @@ jobs:
           assert names[0] == 'repo-feature-release.js', 'release marker must load first'
           assert 'repo-feature-core-helpers.js' in names, 'shared bulk-action helpers must be loaded'
           assert names.index('repo-feature-core-helpers.js') < names.index('repo-feature-check-updates.js')
+          assert names.index('repo-feature-backup.js') < names.index('repo-feature-risk-backup.js'), 'backup API must load before risk hook'
+          assert names.index('repo-feature-branch-overview.js') < names.index('repo-feature-risk-backup.js'), 'branch overview must load before risk hook'
           assert names[-1] == 'repo-feature-thirdparty-menu.js', 'third-party compaction must load last'
           missing = [name for name in names if not (root / name).is_file()]
           assert not missing, f'missing feature files: {missing}'
@@ -60,15 +62,21 @@ jobs:
           grep -q 'var version = "26.4"' cockpit/repo-feature-release.js
           grep -q '<title>GitHub Sync 26.4</title>' cockpit/index.html
           grep -q '>GitHub Sync 26.4</h1>' cockpit/index.html
-          ! grep -Eq -- '--force|--force-with-lease' cockpit/repo-feature-push.js
-          ! grep -Eq -- 'branch.*-D' cockpit/repo-feature-branches.js
+          ! grep -Eq -- '--force|--force-with-lease' cockpit/repo-feature-push.js cockpit/repo-feature-bulk-actions.js
+          ! grep -Eq -- '"branch", "-D"|branch.*-D' cockpit/repo-feature-branches.js cockpit/repo-feature-branch-overview.js
+          ! grep -Eq -- 'reset[[:space:]]+--hard|clean[[:space:]]+-fd' cockpit/repo-feature-activity-recovery.js bin/ghsync-maintenance
           grep -q 'check-ref-format' cockpit/repo-feature-branches.js
           grep -q 'DISCARD ' cockpit/repo-feature-local-changes.js
           grep -q 'bundle create' cockpit/repo-feature-backup.js
           grep -q 'git apply --index' cockpit/repo-feature-backup.js
           grep -q 'diff.*--cached.*--name-only.*--no-renames.*-z' cockpit/repo-feature-commit-selected.js
           grep -q 'fsck' cockpit/repo-feature-maintenance.js
-          grep -q 'automatic' cockpit/repo-feature-policy.js
+          grep -q 'pull-only' cockpit/repo-feature-policy.js
+          grep -q 'pull+push' cockpit/repo-feature-policy.js
+          grep -q 'fetch-only' cockpit/repo-feature-policy.js
+          grep -q 'fetch --all --prune --tags' bin/ghsync-maintenance
+          grep -q 'gc --auto' bin/ghsync-maintenance
+          grep -q 'fsck --connectivity-only' bin/ghsync-maintenance
           grep -q 'third_party_repos' bin/ghsync
           grep -q 'managed_repos' bin/ghsync
 
@@ -77,6 +85,7 @@ jobs:
           npm install --no-save jsdom
           node test/ui-test.js
           node test/row-actions-test.js
+          node test/roadmap-completion-test.js
 
   install:
     name: Install smoke test
@@ -91,9 +100,11 @@ jobs:
         run: |
           test -x "$HOME/.local/bin/ghsync"
           test -x "$HOME/.local/bin/ghsync-thirdparty"
+          test -x "$HOME/.local/bin/ghsync-maintenance"
           test -f "$HOME/.local/share/cockpit/ghsync/manifest.json"
           test -x "$HOME/.local/share/cockpit/ghsync/ghsync"
           test -x "$HOME/.local/share/cockpit/ghsync/ghsync-thirdparty"
+          test -x "$HOME/.local/share/cockpit/ghsync/ghsync-maintenance"
           test -f "$HOME/.local/share/cockpit/ghsync/thirdparty.js"
           test -f "$HOME/.local/share/cockpit/ghsync/repo-features.json"
           python3 - <<'PY'
@@ -112,6 +123,7 @@ jobs:
           "$HOME/.local/bin/ghsync" config
           "$HOME/.local/bin/ghsync" check
           "$HOME/.local/bin/ghsync-thirdparty" --help
+          "$HOME/.local/bin/ghsync-maintenance" --help | grep -q 'ghsync-maintenance'
 
       - name: Clone, pull, commit and status against a local fixture
         run: |
@@ -134,6 +146,9 @@ jobs:
           test -z "$(git -C /tmp/fixture/acme/demo status --porcelain)"
           test "$(git -C /tmp/fixture/acme/demo log -1 --format=%s)" = "local change"
           test "$(git -C /tmp/fixture/acme/demo rev-parse HEAD)" != "$(git --git-dir=/tmp/remote.git rev-parse main)"
+
+          GHSYNC_ROOT=/tmp/fixture "$HOME/.local/bin/ghsync-maintenance" acme/demo --porcelain | tee /tmp/maintenance-out
+          grep -q $'^maintained\tacme/demo\t' /tmp/maintenance-out
 
       - name: Track and manage a third-party repository
         run: |
@@ -199,3 +214,4 @@ jobs:
           bash ./install.sh --uninstall
           test ! -e "$HOME/.local/bin/ghsync"
           test ! -e "$HOME/.local/bin/ghsync-thirdparty"
+          test ! -e "$HOME/.local/bin/ghsync-maintenance"
