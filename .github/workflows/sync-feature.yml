@@ -8,7 +8,7 @@ on:
 
 jobs:
   cockpit-feature-ui:
-    name: Sync, Fleet, Attention, Groups and Roadmap tests
+    name: Sync, Fleet, Attention, Groups, Health and Roadmap tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,5 +24,7 @@ jobs:
         run: node test/attention-feature-test.js
       - name: Test repository Groups
         run: node test/groups-management-test.js
+      - name: Test repository Health
+        run: node test/health-feature-test.js
       - name: Test roadmap completion coverage
         run: node test/roadmap-completion-test.js

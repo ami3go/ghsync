@@ -28,6 +28,7 @@
   "repo-feature-sync-controls.js",
   "repo-feature-machines.js",
   "repo-feature-attention.js",
+  "repo-feature-health.js",
   "repo-feature-bulk-actions.js",
   "repo-feature-github-insights.js",
   "repo-feature-storage-config.js",
