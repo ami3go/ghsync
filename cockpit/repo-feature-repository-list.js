@@ -1,4 +1,4 @@
-/* Export and import the current repository list from the Cockpit UI. */
+/* Export and import the current repository list from Cockpit Settings. */
 (function () {
     "use strict";
     var m = window.GHSyncRepoManager;
@@ -6,37 +6,56 @@
 
     function $(id) { return document.getElementById(id); }
 
-    var panel = $("panel-repos");
-    var toolbar = panel && panel.querySelector(".ghs-toolbar");
-    if (!toolbar || $("btn-repo-export") || $("btn-repo-import")) return;
+    var panel = $("panel-settings");
+    var form = panel && panel.querySelector(".ghs-form");
+    if (!form || $("btn-repo-export") || $("btn-repo-import")) return;
+
+    var group = document.createElement("div");
+    group.id = "repo-list-settings";
+    group.className = "ghs-form-group";
+
+    var label = document.createElement("span");
+    label.className = "ghs-label";
+    label.textContent = "Repository list";
+    group.appendChild(label);
+
+    var actions = document.createElement("div");
+    actions.className = "ghs-form-actions";
 
     var exportBtn = document.createElement("button");
     exportBtn.id = "btn-repo-export";
     exportBtn.type = "button";
-    exportBtn.className = "ghs-btn ghs-btn--secondary ghs-btn--sm";
-    exportBtn.textContent = "Export list";
+    exportBtn.className = "ghs-btn ghs-btn--secondary";
+    exportBtn.textContent = "Export repository list";
 
     var importBtn = document.createElement("button");
     importBtn.id = "btn-repo-import";
     importBtn.type = "button";
-    importBtn.className = "ghs-btn ghs-btn--secondary ghs-btn--sm";
-    importBtn.textContent = "Import list";
+    importBtn.className = "ghs-btn ghs-btn--secondary";
+    importBtn.textContent = "Import repository list";
+
+    actions.appendChild(exportBtn);
+    actions.appendChild(importBtn);
+    group.appendChild(actions);
+
+    var helper = document.createElement("p");
+    helper.className = "ghs-helper";
+    helper.textContent = "Export the repositories currently cloned on this machine, or import a previously exported list to clone missing repositories.";
+    group.appendChild(helper);
+
+    var status = document.createElement("p");
+    status.id = "repo-list-status";
+    status.className = "ghs-helper";
+    group.appendChild(status);
 
     var chooser = document.createElement("input");
     chooser.id = "repo-list-file";
     chooser.type = "file";
     chooser.accept = ".tsv,.txt,text/tab-separated-values,text/plain";
     chooser.className = "ghs-hidden";
+    group.appendChild(chooser);
 
-    var status = document.createElement("span");
-    status.id = "repo-list-status";
-    status.className = "ghs-toolbar__count";
-
-    var anchor = $("btn-orphans") || $("repo-count");
-    toolbar.insertBefore(exportBtn, anchor);
-    toolbar.insertBefore(importBtn, anchor);
-    toolbar.insertBefore(status, anchor);
-    toolbar.appendChild(chooser);
+    form.appendChild(group);
 
     function resize() {
         try { cockpit.transport.control("size-change"); } catch (e) { /* standalone */ }
@@ -44,7 +63,7 @@
 
     function setStatus(text, bad) {
         status.textContent = text || "";
-        status.className = "ghs-toolbar__count" + (bad ? " ghs-t-red" : "");
+        status.className = "ghs-helper" + (bad ? " ghs-t-red" : "");
         resize();
     }
 
