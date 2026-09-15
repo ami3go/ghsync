@@ -20,6 +20,7 @@
   "repo-feature-maintenance.js",
   "repo-feature-sync.js",
   "repo-feature-sync-bootstrap.js",
+  "repo-feature-groups-management.js",
   "repo-feature-repository-list.js",
   "repo-feature-sync-controls.js",
   "repo-feature-machines.js",
