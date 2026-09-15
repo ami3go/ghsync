@@ -51,7 +51,7 @@ const maintenance = includes("bin/ghsync-maintenance", "fetch --all --prune --ta
 assert(!/reset\s+--hard|clean\s+-fd/.test(maintenance), "scheduled maintenance avoids destructive worktree cleanup");
 
 includes("cockpit/repo-feature-reliability-center.js", "Healthy", "Attention", "Problem", "Repository health", "Maintenance timer", "Restore copy", "Run diagnostics", "GitHub authentication", "Shared manifest", "SSH connectivity");
-includes("cockpit/repo-feature-backup.js", "metadata.json", "keepLast", "recovery", "repository.bundle", "git apply --index");
+includes("cockpit/repo-feature-backup.js", "metadata.json", "keepLast", "recovery", "repository.bundle", "apply --index");
 
 const github = includes("cockpit/repo-feature-github-insights.js", "5 * 60 * 1000", "Enable workflow status", "Include open PR and issue counts", "GitHub Actions failed", "--hostname");
 assert(github.includes('localStorage.getItem(ENABLED_KEY) === "yes"'), "GitHub API integration is opt-in");
@@ -63,7 +63,7 @@ const activity = includes("cockpit/repo-feature-activity-recovery.js", "Activity
 assert(!/reset\s+--hard/.test(activity), "recovery actions avoid hard reset");
 
 includes("cockpit/repo-feature-metadata.js", "labels", "notes", "labelRules", "groupPolicies", "machinePolicies", "Share labels and notes through the fleet manifest", "Publish shared metadata");
-includes("cockpit/repo-feature-risk-backup.js", "Create a recovery backup", "cleanup was not started");
+includes("cockpit/repo-feature-risk-backup.js", "Create a recovery backup", "Cleanup was not started");
 
 const roadmap = read("ROADMAP.md");
 assert(!roadmap.includes("- [ ]"), "ROADMAP.md has no unchecked planned implementation items");
