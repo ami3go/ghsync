@@ -59,7 +59,7 @@
         if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) {
             try {
                 var url = new URL(value);
-                url.username = "";
+                if (/^https?:$/i.test(url.protocol)) url.username = "";
                 url.password = "";
                 url.search = "";
                 url.hash = "";
