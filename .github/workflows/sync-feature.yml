@@ -16,6 +16,8 @@ jobs:
         run: npm install --no-save jsdom
       - name: Test Sync tab and manifest assignment
         run: node test/repository-list-feature-test.js
+      - name: Test first-time Sync repository setup
+        run: node test/sync-bootstrap-feature-test.js
       - name: Test Fleet machines view
         run: node test/machines-feature-test.js
       - name: Test Attention dashboard
