@@ -1,6 +1,6 @@
 # Repository list format
 
-GitHub Sync exports repository lists as UTF-8 tab-separated text.
+GitHub Sync exposes repository list import and export under Cockpit **Settings → Repository list**. Lists are UTF-8 tab-separated text.
 
 ```text
 # GitHub Sync repository list v1
