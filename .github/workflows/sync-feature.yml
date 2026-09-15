@@ -1,4 +1,4 @@
-name: Priority 1 Cockpit features
+name: Priority 1 and 2 Cockpit features
 
 on:
   pull_request:
@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  priority-one-ui:
-    name: Sync, Fleet and Attention DOM tests
+  cockpit-feature-ui:
+    name: Sync, Fleet, Attention and Groups DOM tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,3 +22,5 @@ jobs:
         run: node test/machines-feature-test.js
       - name: Test Attention dashboard
         run: node test/attention-feature-test.js
+      - name: Test repository Groups
+        run: node test/groups-management-test.js
