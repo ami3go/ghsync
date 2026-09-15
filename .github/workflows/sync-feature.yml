@@ -1,4 +1,4 @@
-name: Priority 1 and 2 Cockpit features
+name: Roadmap Cockpit features
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   cockpit-feature-ui:
-    name: Sync, Fleet, Attention and Groups DOM tests
+    name: Sync, Fleet, Attention, Groups and Roadmap tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +24,5 @@ jobs:
         run: node test/attention-feature-test.js
       - name: Test repository Groups
         run: node test/groups-management-test.js
+      - name: Test roadmap completion coverage
+        run: node test/roadmap-completion-test.js
