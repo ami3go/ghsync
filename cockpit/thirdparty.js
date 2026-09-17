@@ -1,10 +1,11 @@
-/* GitHub Sync — third-party repositories and repository-manager host. */
+/* GitHub Sync — repository-manager host and integrated third-party repositories. */
 (function () {
     "use strict";
     function $(id) { return document.getElementById(id); }
 
     var manager = window.GHSyncRepoManager = { actions: [] };
     var CORE = null, THIRD = null, ROOT = null, thirdRows = [], openMenu = null, openTrigger = null;
+    var thirdLoaded = false, thirdSyncScheduled = false;
 
     function resize() { try { cockpit.transport.control("size-change"); } catch (e) { /* standalone */ } }
     function installStyles() {
@@ -18,7 +19,8 @@
             ".ghs-action-menu button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:.45rem .65rem;cursor:pointer}" +
             ".ghs-action-menu button:hover:not(:disabled){background:rgba(3,102,214,.08)}" +
             ".ghs-action-menu button:disabled{opacity:.5;cursor:not-allowed}" +
-            ".ghs-action-menu__sep{height:1px;background:#d2d2d2;margin:.25rem 0}";
+            ".ghs-action-menu__sep{height:1px;background:#d2d2d2;margin:.25rem 0}" +
+            ".ghs-repo-source{white-space:nowrap}";
         document.head.appendChild(style);
     }
     function closeMenu() {
@@ -54,7 +56,7 @@
         trigger.setAttribute("aria-label", "Actions for " + name); trigger.setAttribute("aria-haspopup", "menu"); trigger.setAttribute("aria-expanded", "false");
         menu.className = "ghs-action-menu ghs-hidden"; menu.setAttribute("role", "menu");
         row._ghsyncBuiltins.forEach(function (a) { menu.appendChild(menuItem(a.label, a.run, a.state)); });
-        if (manager.actions.length) {
+        if (manager.actions.length && row.dataset.thirdMissing !== "yes") {
             var sep = document.createElement("div"); sep.className = "ghs-action-menu__sep"; menu.appendChild(sep);
             manager.actions.forEach(function (a) { menu.appendChild(menuItem(a.label, function () { a.run(name, row); }, a.state ? a.state(name, row) : {})); });
         }
@@ -71,6 +73,22 @@
         refreshMenus();
     };
     manager.refreshMenus = refreshMenus;
+
+    function filterAttr(key) { return "data-ghs-filter-" + String(key || "filter").replace(/[^a-z0-9_-]/gi, "-").toLowerCase(); }
+    function applyRowVisibility(row) {
+        var hidden = Array.prototype.some.call(row.attributes || [], function (attr) {
+            return attr.name.indexOf("data-ghs-filter-") === 0 && attr.value === "hidden";
+        });
+        row.style.display = hidden ? "none" : "";
+    }
+    manager.setRowFilterHidden = function (row, key, hidden) {
+        if (!row) return;
+        var attr = filterAttr(key);
+        if (hidden) row.setAttribute(attr, "hidden"); else row.removeAttribute(attr);
+        applyRowVisibility(row);
+    };
+    manager.applyRowVisibility = applyRowVisibility;
+
     installStyles(); document.addEventListener("click", closeMenu); document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
     if ($("repos")) { new MutationObserver(refreshMenus).observe($("repos"), { childList: true, subtree: true }); refreshMenus(); }
 
@@ -102,21 +120,6 @@
     manager.runCore = runCore; manager.runThird = runThird; manager.repositoryRoot = repositoryRoot; manager.repoDirectory = repoDirectory; manager.runGit = runGit;
     manager.refreshMainPage = function () { var b = $("btn-refresh"); if (b && !b.disabled) b.click(); };
 
-    var tabs = document.querySelector(".ghs-tabs"), reposPanel = $("panel-repos"), thirdTab, thirdPanel;
-    if (tabs && reposPanel) {
-        thirdTab = $("tab-thirdparty") || document.createElement("button");
-        if (!thirdTab.id) {
-            thirdTab.id = "tab-thirdparty"; thirdTab.className = "ghs-tab"; thirdTab.type = "button"; thirdTab.dataset.tab = "thirdparty";
-            thirdTab.setAttribute("role", "tab"); thirdTab.setAttribute("aria-selected", "false"); thirdTab.textContent = "3rd party repositories";
-            tabs.insertBefore(thirdTab, tabs.querySelector('[data-tab="stats"]'));
-        }
-        thirdPanel = $("panel-thirdparty") || document.createElement("section");
-        if (!thirdPanel.id) {
-            thirdPanel.id = "panel-thirdparty"; thirdPanel.className = "ghs-tab-panel ghs-hidden"; thirdPanel.setAttribute("role", "tabpanel");
-            thirdPanel.innerHTML = '<div class="ghs-form" style="margin-bottom:1rem"><div class="ghs-form-group"><label class="ghs-label" for="third-url">Public Git repository URL</label><div class="ghs-form-actions"><input id="third-url" class="ghs-input" type="text" placeholder="https://github.com/owner/repository.git" autocomplete="off"><button id="btn-third-add" class="ghs-btn ghs-btn--primary" type="button">Clone and track</button></div><p class="ghs-helper">GitHub, GitLab, Codeberg and other public Git URLs are supported. The final owner/repository pair determines the local path.</p></div></div><div class="ghs-toolbar"><span class="ghs-toolbar__count" id="third-count"></span><span class="ghs-toolbar__spacer"></span><button id="btn-third-refresh" class="ghs-btn ghs-btn--secondary ghs-btn--sm" type="button">Refresh</button></div><p id="third-message" class="ghs-helper"></p><div class="ghs-table-wrap ghs-hidden" id="third-wrap"><table class="ghs-table"><thead><tr><th>Repository</th><th>Source</th><th>State</th><th class="ghs-table__action">Actions</th></tr></thead><tbody id="third-body"></tbody></table></div><div id="third-empty" class="ghs-empty"><h3 class="ghs-empty__title">No third-party repositories</h3><p class="ghs-empty__body">Paste a public Git repository URL above to clone and track it.</p></div>';
-            reposPanel.parentNode.insertBefore(thirdPanel, reposPanel.nextSibling);
-        }
-    }
     function displayUrl(value) {
         value = (value || "").trim();
         if (!/^https?:\/\//i.test(value)) return value;
@@ -124,38 +127,194 @@
             var url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.toString();
         } catch (e) { return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1").replace(/[?#].*$/, ""); }
     }
-    function thirdMessage(text, bad) { if ($("third-message")) { $("third-message").textContent = text || ""; $("third-message").className = "ghs-helper" + (bad ? " ghs-t-red" : ""); } resize(); }
-    function renderThird() {
-        var body = $("third-body"); if (!body) return; body.textContent = "";
-        $("third-count").textContent = thirdRows.length + (thirdRows.length === 1 ? " repository" : " repositories");
-        $("third-wrap").classList.toggle("ghs-hidden", !thirdRows.length); $("third-empty").classList.toggle("ghs-hidden", !!thirdRows.length);
-        thirdRows.forEach(function (r) {
-            var tr = document.createElement("tr"); tr.innerHTML = '<td class="ghs-repo-name"></td><td class="ghs-mono"></td><td></td><td class="ghs-table__action"></td>';
-            tr.children[0].textContent = r.name; tr.children[1].textContent = displayUrl(r.url); tr.children[2].textContent = r.state === "cloned" ? "Cloned" : "Missing";
-            var main = document.createElement("button"); main.className = "ghs-btn ghs-btn--secondary ghs-btn--sm"; main.textContent = r.state === "cloned" ? "Pull" : "Clone";
-            main.onclick = function () { (r.state === "cloned" ? runCore(["pull", r.name]) : runThird(["add", r.url])).then(refreshThird).then(manager.refreshMainPage).catch(function (e) { thirdMessage(e.message || String(e), true); }); };
-            var rm = document.createElement("button"); rm.className = "ghs-btn ghs-btn--secondary ghs-btn--danger-text ghs-btn--sm"; rm.style.marginLeft = ".375rem"; rm.textContent = "Untrack";
-            rm.onclick = function () { if (window.confirm("Stop tracking " + r.name + "? The local clone will be kept.")) runThird(["remove", r.name]).then(refreshThird).then(manager.refreshMainPage); };
-            tr.children[3].appendChild(main); tr.children[3].appendChild(rm); body.appendChild(tr);
-        }); resize();
+    function thirdMessage(text, bad) {
+        var el = $("third-inline-message");
+        if (!el) return;
+        el.textContent = text || "";
+        el.className = "ghs-helper" + (bad ? " ghs-t-red" : "");
+        resize();
+    }
+    function ensureIntegratedUi() {
+        var panel = $("panel-repos"), toolbar = panel && panel.querySelector(".ghs-toolbar"), search = $("filter");
+        if (!panel || !toolbar || !search) return;
+        if (!$("repo-source-filter")) {
+            var select = document.createElement("select");
+            select.id = "repo-source-filter"; select.className = "ghs-input ghs-input--narrow"; select.setAttribute("aria-label", "Filter by repository source");
+            [{ value: "", text: "All sources" }, { value: "managed", text: "Managed" }, { value: "third-party", text: "Third-party" }].forEach(function (item) {
+                var option = document.createElement("option"); option.value = item.value; option.textContent = item.text; select.appendChild(option);
+            });
+            toolbar.insertBefore(select, search.parentNode.nextSibling);
+            select.onchange = function () { applyIntegratedFilters(); };
+        }
+        if (!$("btn-third-add-inline")) {
+            var add = document.createElement("button"); add.id = "btn-third-add-inline"; add.type = "button";
+            add.className = "ghs-btn ghs-btn--secondary ghs-btn--sm"; add.textContent = "Add third-party";
+            add.title = "Clone and track a public Git repository";
+            toolbar.insertBefore(add, $("btn-orphans") || $("repo-count") || null);
+            add.onclick = addThirdParty;
+        }
+        if (!$("third-inline-message")) {
+            var message = document.createElement("p"); message.id = "third-inline-message"; message.className = "ghs-helper";
+            toolbar.parentNode.insertBefore(message, toolbar.nextSibling);
+        }
+    }
+    function thirdMap() {
+        var map = Object.create(null);
+        thirdRows.forEach(function (row) { map[row.name] = row; });
+        return map;
+    }
+    function rowName(row) {
+        if (row.dataset.repoName) return row.dataset.repoName;
+        var cell = row.querySelector(".ghs-repo-name");
+        if (!cell) return "";
+        row.dataset.repoName = cell.textContent.trim();
+        return row.dataset.repoName;
+    }
+    function sourceBadge(row, entry) {
+        var state = row.children[2]; if (!state) return;
+        var old = state.querySelector(".ghs-repo-source"); if (old) old.remove();
+        if (!entry) return;
+        var badge = document.createElement("div"); badge.className = "ghs-helper ghs-repo-source"; badge.textContent = "Third-party";
+        badge.title = displayUrl(entry.url); state.appendChild(badge);
+    }
+    function cloneBuiltinSnapshot(row) {
+        if (row._ghsyncBuiltins && row._ghsyncBuiltins.length) return;
+        var cell = row.querySelector("td.ghs-table__action"); if (!cell) return;
+        var buttons = Array.prototype.slice.call(cell.querySelectorAll("button"));
+        if (!buttons.length) return;
+        row._ghsyncBuiltins = buttons.map(function (button) {
+            return { label: button.textContent.trim(), run: function () { button.click(); }, state: { disabled: button.disabled, title: button.title } };
+        });
+    }
+    function untrack(name) {
+        if (!window.confirm("Stop tracking " + name + " as a third-party repository? The local clone will be kept.")) return;
+        thirdMessage("Untracking " + name + "…");
+        runThird(["remove", name]).then(refreshThird).then(function () {
+            manager.refreshMainPage(); thirdMessage("Stopped tracking " + name + ". The local clone was kept.");
+        }).catch(function (e) { thirdMessage("Could not untrack " + name + ": " + (e.message || String(e)), true); });
+    }
+    function syncThirdPartyBuiltin(row, entry) {
+        cloneBuiltinSnapshot(row);
+        if (!row._ghsyncBuiltins) return false;
+        var before = row._ghsyncBuiltins.length;
+        row._ghsyncBuiltins = row._ghsyncBuiltins.filter(function (action) { return !action.thirdPartyUntrack; });
+        if (entry && row.dataset.thirdMissing !== "yes") {
+            row._ghsyncBuiltins.push({ label: "Untrack", run: function () { untrack(entry.name); }, state: {}, thirdPartyUntrack: true });
+        }
+        return before !== row._ghsyncBuiltins.length || !!entry;
+    }
+    function missingRow(entry) {
+        var tr = document.createElement("tr");
+        tr.dataset.repoName = entry.name; tr.dataset.repoSource = "third-party"; tr.dataset.thirdSynthetic = "yes"; tr.dataset.thirdMissing = "yes";
+        var name = document.createElement("td"); name.className = "ghs-repo-name"; name.textContent = entry.name; tr.appendChild(name);
+        var branch = document.createElement("td"); branch.textContent = "—"; tr.appendChild(branch);
+        var state = document.createElement("td"); state.textContent = "Missing"; tr.appendChild(state); sourceBadge(tr, entry);
+        for (var i = 0; i < 4; i += 1) { var n = document.createElement("td"); n.className = "ghs-num ghs-zero"; n.textContent = "0"; tr.appendChild(n); }
+        var act = document.createElement("td"); act.className = "ghs-table__action"; tr.appendChild(act);
+        tr._ghsyncBuiltins = [
+            { label: "Clone", run: function () { cloneMissing(entry); }, state: {} },
+            { label: "Untrack", run: function () { untrack(entry.name); }, state: {}, thirdPartyUntrack: true }
+        ];
+        return tr;
+    }
+    function cloneMissing(entry) {
+        thirdMessage("Cloning " + entry.name + "…");
+        runThird(["add", entry.url]).then(refreshThird).then(function () {
+            manager.refreshMainPage(); thirdMessage("Cloned and tracked " + entry.name + ".");
+        }).catch(function (e) { thirdMessage("Could not clone " + entry.name + ": " + (e.message || String(e)), true); });
+    }
+    function applyIntegratedFilters() {
+        var source = ($("repo-source-filter") || {}).value || "", needle = ($("filter") || {}).value || "";
+        needle = needle.trim().toLowerCase();
+        document.querySelectorAll("#repos tr").forEach(function (row) {
+            manager.setRowFilterHidden(row, "source", !!source && row.dataset.repoSource !== source);
+            manager.setRowFilterHidden(row, "third-search", row.dataset.thirdSynthetic === "yes" && !!needle && rowName(row).toLowerCase().indexOf(needle) < 0);
+        });
+        refreshRepositoryView();
+    }
+    function refreshRepositoryView() {
+        var body = $("repos"); if (!body) return;
+        var rows = Array.prototype.slice.call(body.querySelectorAll("tr"));
+        var visible = rows.filter(function (row) { return row.style.display !== "none"; });
+        if ($("repo-count")) $("repo-count").textContent = visible.length + (visible.length === 1 ? " repository" : " repositories");
+        var wrap = document.querySelector("#panel-repos .ghs-table-wrap"), empty = $("repos-empty"), emptyBody = $("repos-empty-body"), clone = $("btn-empty-clone");
+        if (wrap) wrap.classList.toggle("ghs-hidden", visible.length === 0);
+        if (empty) empty.classList.toggle("ghs-hidden", visible.length > 0);
+        if (!visible.length && emptyBody) emptyBody.textContent = rows.length ? "No repository matches the current filters." : "Nothing has been cloned or tracked yet.";
+        if (clone) clone.classList.toggle("ghs-hidden", rows.length > 0);
+        resize();
+    }
+    manager.refreshRepositoryView = refreshRepositoryView;
+
+    function integrateThirdPartyRows() {
+        ensureIntegratedUi();
+        var body = $("repos"); if (!body || !thirdLoaded) return;
+        body.querySelectorAll('tr[data-third-synthetic="yes"]').forEach(function (row) { row.remove(); });
+        var map = thirdMap(), present = Object.create(null), actionChanged = false;
+        body.querySelectorAll("tr").forEach(function (row) {
+            var name = rowName(row), entry = map[name] || null, source = entry ? "third-party" : "managed";
+            present[name] = true;
+            if (row.dataset.repoSource !== source) { row.dataset.repoSource = source; actionChanged = true; }
+            sourceBadge(row, entry);
+            if (syncThirdPartyBuiltin(row, entry)) actionChanged = actionChanged || !!entry;
+        });
+        thirdRows.forEach(function (entry) { if (!present[entry.name]) body.appendChild(missingRow(entry)); });
+        applyIntegratedFilters();
+        if (manager.refreshGroups) manager.refreshGroups();
+        if (actionChanged) {
+            body.querySelectorAll("td.ghs-table__action").forEach(function (cell) {
+                cell.removeAttribute("data-manager-ready"); cell.removeAttribute("data-context-overlay-ready");
+            });
+        }
+        refreshMenus();
+    }
+    function scheduleThirdIntegration() {
+        if (thirdSyncScheduled) return;
+        thirdSyncScheduled = true;
+        window.setTimeout(function () { thirdSyncScheduled = false; integrateThirdPartyRows(); }, 0);
     }
     function refreshThird() {
-        thirdMessage("Loading tracked repositories…");
         return runThird(["list"]).then(function (out) {
-            thirdRows = []; out.split("\n").forEach(function (line) { var f = line.split("\t"); if (f[0] === "third-party") thirdRows.push({ name: f[1], url: f[2], state: f[3] || "missing" }); });
-            thirdRows.sort(function (a, b) { return a.name.localeCompare(b.name); }); renderThird(); thirdMessage(thirdRows.length ? "Tracked clones are updated by normal Pull and Full sync." : "");
-        }).catch(function (e) { thirdMessage("Could not load third-party repositories: " + (e.message || String(e)), true); });
+            thirdRows = [];
+            out.split("\n").forEach(function (line) {
+                var f = line.split("\t");
+                if (f[0] === "third-party" && f[1]) thirdRows.push({ name: f[1], url: f[2] || "", state: f[3] || "missing" });
+            });
+            thirdRows.sort(function (a, b) { return a.name.localeCompare(b.name); });
+            thirdLoaded = true; manager.thirdPartyRows = thirdRows.slice(); scheduleThirdIntegration(); return thirdRows;
+        }).catch(function (e) {
+            thirdLoaded = true; thirdRows = []; manager.thirdPartyRows = []; scheduleThirdIntegration();
+            thirdMessage("Could not load third-party repositories: " + (e.message || String(e)), true);
+            return [];
+        });
     }
-    function selectThird() {
-        document.querySelectorAll(".ghs-tab").forEach(function (t) { var on = t === thirdTab; t.classList.toggle("ghs-tab--current", on); t.setAttribute("aria-selected", on ? "true" : "false"); });
-        document.querySelectorAll(".ghs-tab-panel").forEach(function (p) { p.classList.add("ghs-hidden"); }); thirdPanel.classList.remove("ghs-hidden"); refreshThird(); resize();
+    function addThirdParty() {
+        var value = window.prompt("Public Git repository URL to clone and track:", "https://github.com/");
+        if (value === null) return;
+        value = value.trim(); if (!value) return thirdMessage("Enter a public Git repository URL.", true);
+        var button = $("btn-third-add-inline"); if (button) button.disabled = true;
+        thirdMessage("Adding third-party repository…");
+        runThird(["add", value]).then(refreshThird).then(function () {
+            manager.refreshMainPage(); thirdMessage("Third-party repository added.");
+        }).catch(function (e) { thirdMessage("Could not add repository: " + (e.message || String(e)), true); })
+            .finally(function () { if (button) button.disabled = false; });
     }
-    if (thirdTab) thirdTab.onclick = selectThird;
-    if ($("btn-third-refresh")) $("btn-third-refresh").onclick = refreshThird;
-    if ($("btn-third-add")) $("btn-third-add").onclick = function () { var u = $("third-url").value.trim(); if (!u) return thirdMessage("Enter a public Git repository URL first.", true); runThird(["add", u]).then(function () { $("third-url").value = ""; }).then(refreshThird).then(manager.refreshMainPage).catch(function (e) { thirdMessage(e.message || String(e), true); }); };
-    if ($("third-url")) $("third-url").onkeydown = function (e) { if (e.key === "Enter") $("btn-third-add").click(); };
+    manager.refreshThirdParty = refreshThird;
+    manager.isThirdParty = function (name) { return thirdRows.some(function (row) { return row.name === name; }); };
 
-    if (thirdTab) new MutationObserver(function () { if (!thirdTab.classList.contains("ghs-tab--current")) thirdPanel.classList.add("ghs-hidden"); }).observe(thirdTab, { attributes: true });
+    ensureIntegratedUi();
+    if ($("filter")) $("filter").addEventListener("input", scheduleThirdIntegration);
+    if ($("repos")) {
+        new MutationObserver(function (records) {
+            var relevant = records.some(function (record) {
+                return Array.prototype.slice.call(record.addedNodes).concat(Array.prototype.slice.call(record.removedNodes)).some(function (node) {
+                    return node && node.nodeType === 1 && (!node.dataset || node.dataset.thirdSynthetic !== "yes");
+                });
+            });
+            if (relevant) scheduleThirdIntegration();
+        }).observe($("repos"), { childList: true });
+    }
+    refreshThird();
 
     fetch("repo-features.json", { cache: "no-store" }).then(function (r) {
         if (!r.ok) throw new Error("feature manifest");
