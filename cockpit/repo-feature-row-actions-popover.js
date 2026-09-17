@@ -1,4 +1,4 @@
-/* Feature 20: keep Pull visible and render secondary actions beside each row. */
+/* Feature 20: keep Pull/Clone visible and render secondary actions beside each row. */
 (function () {
     "use strict";
     var m = window.GHSyncRepoManager;
@@ -64,6 +64,10 @@
         return null;
     }
 
+    function primaryBuiltin(row) {
+        return findBuiltin(row, "Pull") || findBuiltin(row, "Clone");
+    }
+
     function addMenuButton(menu, label, run, state) {
         state = state || {};
         var button = document.createElement("button");
@@ -98,17 +102,18 @@
         if (!cluster) return;
 
         var name = rowName(row);
+        var primaryAction = primaryBuiltin(row);
         var menu = document.createElement("div");
         menu.className = "ghs-context-overlay";
         menu.setAttribute("role", "menu");
         menu.setAttribute("aria-label", "Actions for " + name);
 
         builtinActions(row).forEach(function (action) {
-            if (action.label === "Pull") return;
+            if (action === primaryAction) return;
             addMenuButton(menu, action.label, action.run, action.state);
         });
 
-        if (m.actions && m.actions.length) {
+        if (m.actions && m.actions.length && row.dataset.thirdMissing !== "yes") {
             addSeparator(menu);
             m.actions.forEach(function (action) {
                 var state = action.state ? action.state(name, row) : {};
@@ -153,24 +158,24 @@
         if (openTrigger && cell.contains(openTrigger)) closeOverlay();
 
         var name = rowName(row);
-        var pullAction = findBuiltin(row, "Pull");
+        var primaryAction = primaryBuiltin(row);
         var cluster = document.createElement("div");
         cluster.className = "ghs-row-actions";
 
-        if (pullAction) {
-            var pull = document.createElement("button");
-            pull.type = "button";
-            pull.className = "ghs-btn ghs-btn--secondary ghs-btn--sm ghs-primary-pull";
-            pull.textContent = "Pull";
-            pull.disabled = !!(pullAction.state && pullAction.state.disabled);
-            if (pullAction.state && pullAction.state.title) pull.title = pullAction.state.title;
-            pull.addEventListener("click", function (event) {
+        if (primaryAction) {
+            var primary = document.createElement("button");
+            primary.type = "button";
+            primary.className = "ghs-btn ghs-btn--secondary ghs-btn--sm ghs-primary-pull";
+            primary.textContent = primaryAction.label;
+            primary.disabled = !!(primaryAction.state && primaryAction.state.disabled);
+            if (primaryAction.state && primaryAction.state.title) primary.title = primaryAction.state.title;
+            primary.addEventListener("click", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
                 closeOverlay();
-                if (!pull.disabled) pullAction.run();
+                if (!primary.disabled) primaryAction.run();
             });
-            cluster.appendChild(pull);
+            cluster.appendChild(primary);
         }
 
         var trigger = document.createElement("button");
