@@ -93,8 +93,23 @@ setTimeout(() => {
   source.value = "managed";
   source.dispatchEvent(new window.Event("change"));
   assert(visibleNames().join(",") === "acme/api", "Managed source filter hides third-party repositories");
+
+  const manager = window.GHSyncRepoManager;
+  manager.setRowFilterHidden(managed, "group", true);
+  source.value = "managed";
+  source.dispatchEvent(new window.Event("change"));
+  assert(visibleNames().length === 0, "Group and Source filters compose instead of overriding each other");
+  manager.setRowFilterHidden(managed, "group", false);
   source.value = "";
   source.dispatchEvent(new window.Event("change"));
+  assert(visibleNames().join(",") === "acme/api,vendor/missing,vendor/tool", "clearing both filters restores the combined list");
+
+  const discovery = doc.createElement("script");
+  discovery.textContent = fs.readFileSync(path.join(DIR, "repo-feature-discover-thirdparty.js"), "utf8");
+  doc.body.appendChild(discovery);
+  assert(!!doc.getElementById("btn-third-discover"), "Discover local remains available in the Repositories toolbar");
+  assert(!fs.readFileSync(path.join(DIR, "repo-feature-discover-thirdparty.js"), "utf8").includes("btn-third-refresh"),
+         "Discover local no longer depends on the removed third-party tab");
 
   const actions = doc.createElement("script");
   actions.textContent = fs.readFileSync(path.join(DIR, "repo-feature-row-actions-popover.js"), "utf8");
