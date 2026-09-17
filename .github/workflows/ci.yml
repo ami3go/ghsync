@@ -49,7 +49,7 @@ jobs:
           assert names.index('repo-feature-core-helpers.js') < names.index('repo-feature-check-updates.js')
           assert names.index('repo-feature-backup.js') < names.index('repo-feature-risk-backup.js'), 'backup API must load before risk hook'
           assert names.index('repo-feature-branch-overview.js') < names.index('repo-feature-risk-backup.js'), 'branch overview must load before risk hook'
-          assert names[-1] == 'repo-feature-thirdparty-menu.js', 'third-party compaction must load last'
+          assert names[-1] == 'repo-feature-row-actions-popover.js', 'integrated row-action popover must load last'
           missing = [name for name in names if not (root / name).is_file()]
           assert not missing, f'missing feature files: {missing}'
           unexpected = sorted(p.name for p in root.glob('repo-feature-*.js') if p.name not in names)

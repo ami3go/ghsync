@@ -24,6 +24,8 @@ jobs:
         run: node test/attention-feature-test.js
       - name: Test repository Groups
         run: node test/groups-management-test.js
+      - name: Test integrated third-party repositories
+        run: node test/thirdparty-integrated-test.js
       - name: Test repository Health
         run: node test/health-feature-test.js
       - name: Test roadmap completion coverage
