@@ -3,13 +3,20 @@
     "use strict";
     var m = window.GHSyncRepoManager;
     if (!m) return;
-    var refresh = document.getElementById("btn-third-refresh");
-    if (!refresh || document.getElementById("btn-third-discover")) return;
+
+    var add = document.getElementById("btn-third-add-inline");
+    var toolbar = document.querySelector("#panel-repos .ghs-toolbar");
+    if ((!add && !toolbar) || document.getElementById("btn-third-discover")) return;
 
     var button = document.createElement("button");
     button.id = "btn-third-discover"; button.type = "button";
     button.className = "ghs-btn ghs-btn--secondary ghs-btn--sm"; button.textContent = "Discover local";
-    refresh.parentNode.insertBefore(button, refresh);
+    button.title = "Find existing local clones that are not yet tracked as third-party repositories";
+    if (add && add.parentNode) add.parentNode.insertBefore(button, add.nextSibling);
+    else {
+        var anchor = document.getElementById("btn-orphans") || document.getElementById("repo-count");
+        toolbar.insertBefore(button, anchor || null);
+    }
 
     function checks(out) {
         var v = {};
@@ -60,9 +67,8 @@
             var selected = choice.toUpperCase() === "ALL" ? items : items.filter(function (item) { return item.name === choice; });
             if (!selected.length) throw new Error("No discovered repository matched " + choice);
             return m.mapLimit(selected, 2, function (item) { return m.runThird(["add", item.url]); }).then(function () {
-                document.getElementById("btn-third-refresh").click();
-                m.refreshMainPage();
-            });
+                if (m.refreshThirdParty) return m.refreshThirdParty();
+            }).then(function () { m.refreshMainPage(); });
         }).catch(function (e) {
             window.alert("Discovery failed: " + (e.message || String(e)));
         }).finally(function () {
