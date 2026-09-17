@@ -35,6 +35,5 @@
   "repo-feature-activity-recovery.js",
   "repo-feature-metadata.js",
   "repo-feature-risk-backup.js",
-  "repo-feature-row-actions-popover.js",
-  "repo-feature-thirdparty-menu.js"
+  "repo-feature-row-actions-popover.js"
 ]
