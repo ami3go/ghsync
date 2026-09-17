@@ -40,7 +40,7 @@
         if (row.dataset.repoName) return row.dataset.repoName;
         var cell = row.querySelector(".ghs-repo-name"); if (!cell) return "";
         var clone = cell.cloneNode(true);
-        clone.querySelectorAll(".ghs-repo-meta,.ghs-favorite-star,.ghs-update-policy,.ghs-health-state").forEach(function (el) { el.remove(); });
+        clone.querySelectorAll(".ghs-repo-meta,.ghs-favorite-star,.ghs-update-policy,.ghs-health-state,.ghs-repo-source").forEach(function (el) { el.remove(); });
         var name = clone.textContent.trim(); row.dataset.repoName = name; return name;
     }
     m.rowName = rowName;
@@ -100,8 +100,10 @@
                 var meta = document.createElement("div"); meta.className = "ghs-helper ghs-repo-meta";
                 meta.textContent = [group, tags.join(", "), note ? "note" : ""].filter(Boolean).join(" • "); stateCell.appendChild(meta);
             }
-            row.style.display = selected && group !== selected ? "none" : "";
+            if (m.setRowFilterHidden) m.setRowFilterHidden(row, "group", !!selected && group !== selected);
+            else row.style.display = selected && group !== selected ? "none" : "";
         });
+        if (m.refreshRepositoryView) m.refreshRepositoryView();
     }
     m.refreshGroups = apply; m.rebuildGroupFilter = rebuildFilter;
 
